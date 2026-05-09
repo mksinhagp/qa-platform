@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { hashPassword } from '@qa-platform/auth';
-import { invokeProcWrite, query, initializePool } from '@qa-platform/db';
+import { invokeProcWrite, initializePool } from '@qa-platform/db';
 import { loadEnv } from '@qa-platform/config';
 
 // Initialize on first request
@@ -15,9 +15,14 @@ async function ensureInitialized() {
 
 // This endpoint is only available in development/test environments
 export async function POST(request: NextRequest) {
-  // Security check - only allow in non-production environments
-  if (process.env.NODE_ENV === 'production') {
-    return NextResponse.json({ error: 'Not available in production' }, { status: 403 });
+  if (process.env.NODE_ENV !== 'test' && process.env.E2E_TEST_MODE !== 'true') {
+    return NextResponse.json({ error: 'Test setup is disabled' }, { status: 403 });
+  }
+
+  const expectedToken = process.env.TEST_SETUP_TOKEN;
+  const providedToken = request.headers.get('x-test-setup-token');
+  if (!expectedToken || providedToken !== expectedToken) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   try {
@@ -54,12 +59,9 @@ export async function POST(request: NextRequest) {
       }
 
       case 'resetVault': {
-        // Reset vault to unbootstrapped state
-        // This is a test-only operation using direct SQL
-        await query('DELETE FROM vault_unlock_sessions');
-        await query('DELETE FROM secret_access_logs');
-        await query('DELETE FROM secret_records');
-        await query('DELETE FROM vault_state');
+        await invokeProcWrite('sp_test_vault_reset', {
+          i_updated_by: 'test_setup',
+        });
 
         return NextResponse.json({ success: true, message: 'Vault reset' });
       }

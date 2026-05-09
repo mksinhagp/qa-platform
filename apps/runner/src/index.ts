@@ -106,8 +106,7 @@ app.post('/abort', (req: Request, res: Response) => {
   }
 
   logger.info(`Abort requested for run ${manager.getRunId()}`, undefined, correlationId);
-  // ExecutionManager will set all in-flight runners to aborted on next step completion
-  // (full in-flight cancellation requires AbortController integration — Phase 4)
+  manager.abort();
   res.status(200).json({ message: 'Abort signal sent', run_id: manager.getRunId() });
 });
 

@@ -24,6 +24,11 @@ vi.mock('@qa-platform/auth', () => ({
   requireCapability: vi.fn(),
 }));
 
+vi.mock('@qa-platform/config', () => ({
+  getEnv: vi.fn(() => ({ RUNNER_API_BASE_URL: 'http://runner:4000' })),
+  loadEnv: vi.fn(() => ({ RUNNER_API_BASE_URL: 'http://runner:4000' })),
+}));
+
 const AUTH_CTX = { operatorId: 42, sessionId: 1 };
 
 // ─── Sample rows ─────────────────────────────────────────────────────────────
@@ -386,6 +391,7 @@ describe('updateRunStatus', () => {
 
 describe('abortRun', () => {
   it('calls sp_runs_update_status with aborted status', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
     vi.mocked(invokeProcWrite).mockResolvedValueOnce([{ o_id: 1, o_status: 'aborted' }]);
 
     const result = await abortRun(1);
@@ -395,6 +401,7 @@ describe('abortRun', () => {
       i_id: 1,
       i_status: 'aborted',
     }));
+    expect(fetch).toHaveBeenCalledWith('http://runner:4000/abort', expect.objectContaining({ method: 'POST' }));
   });
 });
 

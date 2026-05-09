@@ -2,6 +2,7 @@
 
 import { invokeProc, invokeProcWrite } from '@qa-platform/db';
 import { requireCapability } from '@qa-platform/auth';
+import { getEnv, loadEnv } from '@qa-platform/config';
 import { z } from 'zod';
 
 // ─── Validation Schemas ──────────────────────────────────────────────────────
@@ -17,6 +18,14 @@ const createRunSchema = z.object({
   browsers: z.array(z.enum(['chromium', 'firefox', 'webkit'])).min(1, 'At least one browser is required'),
   flow_names: z.array(z.string().min(1)).min(1, 'At least one flow is required'),
   notes: z.string().max(2000).optional(),
+});
+
+const runConfigSchema = z.object({
+  persona_ids: z.array(z.string()),
+  device_profile_ids: z.array(z.number()),
+  network_profile_ids: z.array(z.number()),
+  browsers: z.array(z.string()),
+  flow_names: z.array(z.string()),
 });
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -223,6 +232,13 @@ export async function getRun(id: number): Promise<{ success: boolean; run?: RunD
     const result = await invokeProc('sp_runs_get_by_id', { i_id: id });
     if (!result.length) return { success: false, error: 'Run not found' };
     const row = result[0];
+    const parsedConfig = runConfigSchema.safeParse(
+      typeof row.o_config === 'string' ? JSON.parse(row.o_config) : (row.o_config ?? {}),
+    );
+    if (!parsedConfig.success) {
+      console.error('Invalid run config:', parsedConfig.error.flatten());
+      return { success: false, error: 'Run config is invalid' };
+    }
     return {
       success: true,
       run: {
@@ -237,7 +253,7 @@ export async function getRun(id: number): Promise<{ success: boolean; run?: RunD
         skipped_executions: row.o_skipped_executions,
         notes: row.o_notes, is_pinned: row.o_is_pinned,
         created_date: row.o_created_date, updated_date: row.o_updated_date,
-        config: typeof row.o_config === 'string' ? JSON.parse(row.o_config) : (row.o_config ?? {}),
+        config: parsedConfig.data,
         created_by: row.o_created_by, updated_by: row.o_updated_by,
       },
     };
@@ -345,6 +361,24 @@ export async function updateRunStatus(
 export async function abortRun(id: number): Promise<{ success: boolean; error?: string }> {
   try {
     const authContext = await requireCapability('run.execute');
+    const env = (() => {
+      try {
+        return getEnv();
+      } catch {
+        return loadEnv();
+      }
+    })();
+    const runnerResponse = await fetch(`${env.RUNNER_API_BASE_URL}/abort`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!runnerResponse.ok && runnerResponse.status !== 404) {
+      return { success: false, error: `Runner abort failed with status ${runnerResponse.status}` };
+    }
+
     await invokeProcWrite('sp_runs_update_status', {
       i_id: id,
       i_status: 'aborted',

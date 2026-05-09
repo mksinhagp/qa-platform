@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION sp_secret_access_logs_insert(
     i_access_reason TEXT DEFAULT NULL,
     i_run_execution_id INTEGER DEFAULT NULL,
     i_ip_address INET DEFAULT NULL,
-    i_created_by VARCHAR
+    i_created_by VARCHAR DEFAULT NULL
 )
 RETURNS TABLE (
     o_id INTEGER,

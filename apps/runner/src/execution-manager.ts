@@ -91,6 +91,17 @@ function lookupPersona(personaId: string): Persona {
   return p;
 }
 
+function validateCallbackUrl(callbackUrl: string): void {
+  const allowedOrigins = (process.env.RUNNER_CALLBACK_ALLOWED_ORIGINS ?? 'http://dashboard-web:3000,http://localhost:3000')
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean);
+  const parsed = new URL(callbackUrl);
+  if (!['http:', 'https:'].includes(parsed.protocol) || !allowedOrigins.includes(parsed.origin)) {
+    throw new Error(`Callback URL origin is not allowed: ${parsed.origin}`);
+  }
+}
+
 async function sendCallback(
   callbackUrl: string,
   token: string,
@@ -99,6 +110,7 @@ async function sendCallback(
   correlationId: string,
 ): Promise<void> {
   try {
+    validateCallbackUrl(callbackUrl);
     const body = {
       execution_id: executionId,
       status: result.status,
@@ -150,6 +162,7 @@ export class ExecutionManager {
   private _correlationId: string;
   // Pending resolve callbacks from waitForSlot() — signalled each time running decrements
   private _slotWaiters: Array<() => void> = [];
+  private _aborted = false;
 
   constructor(correlationId: string, runId?: number) {
     this._correlationId = correlationId;
@@ -195,6 +208,15 @@ export class ExecutionManager {
     const inFlight: Promise<void>[] = [];
 
     while (this.queue.length > 0) {
+      if (this._aborted) {
+        // Mark remaining queued executions as aborted
+        for (const rem of this.queue) {
+          const s = this.states.get(rem.execution_id);
+          if (s) s.status = 'aborted';
+        }
+        this.queue.length = 0;
+        break;
+      }
       // Block here until a slot is free (resolves immediately if running < cap)
       await this.waitForSlot();
       const ex = this.queue.shift();
@@ -282,6 +304,25 @@ export class ExecutionManager {
         );
       }
     }
+  }
+
+  /**
+   * Abort the run: mark all queued executions as aborted and prevent new ones from starting.
+   * In-flight executions will complete their current step before stopping.
+   */
+  abort(): void {
+    this._aborted = true;
+    // Flush queued entries immediately
+    for (const ex of this.queue) {
+      const s = this.states.get(ex.execution_id);
+      if (s) s.status = 'aborted';
+    }
+    this.queue.length = 0;
+    logger.info(`Run ${this._runId} abort flag set`, undefined, this._correlationId);
+  }
+
+  get isAborted(): boolean {
+    return this._aborted;
   }
 
   getState(): Map<number, ExecutionState> {

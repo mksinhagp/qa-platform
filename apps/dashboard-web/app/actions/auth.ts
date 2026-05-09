@@ -1,9 +1,11 @@
 'use server';
 
 import { cookies } from 'next/headers';
+import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { verifyPassword, createSession, revokeSession } from '@qa-platform/auth';
 import { invokeProc } from '@qa-platform/db';
+import { getEnv, loadEnv } from '@qa-platform/config';
 
 export interface LoginResult {
   success: boolean;
@@ -38,11 +40,23 @@ export async function login(
       return { success: false, error: 'Invalid login or password' };
     }
 
+    const headerStore = await headers();
+    const forwardedFor = headerStore.get('x-forwarded-for')?.split(',')[0]?.trim();
+    const ipAddress = forwardedFor || headerStore.get('x-real-ip') || undefined;
+    const userAgent = headerStore.get('user-agent') || undefined;
+    const env = (() => {
+      try {
+        return getEnv();
+      } catch {
+        return loadEnv();
+      }
+    })();
+
     // Create session
     const session = await createSession(
       operator.o_id,
-      '127.0.0.1', // TODO: Get real IP from request
-      'User-Agent', // TODO: Get real user agent from request
+      ipAddress,
+      userAgent,
       login
     );
 
@@ -52,7 +66,7 @@ export async function login(
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
-      maxAge: 60 * 60 * 24 * 30, // 30 days
+      maxAge: env.AUTH_SESSION_ABSOLUTE_TIMEOUT_SECONDS,
       path: '/',
     });
 

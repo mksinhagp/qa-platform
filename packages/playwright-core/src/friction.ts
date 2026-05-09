@@ -51,7 +51,8 @@ export class FrictionCollector {
   private lastActionTime: Date = new Date();
   private _persona: Persona;
 
-  constructor(_page: Page, persona: Persona) {
+  constructor(page: Page, persona: Persona) {
+    void page;
     this._persona = persona;
     this.flowStartTime = new Date();
     this.lastActionTime = new Date();

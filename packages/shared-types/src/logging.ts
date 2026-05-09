@@ -51,7 +51,13 @@ export class Logger {
       }),
     };
 
-    console.log(JSON.stringify(entry));
+    const output = JSON.stringify(entry);
+    switch (level) {
+      case 'debug': console.debug(output); break;
+      case 'warn':  console.warn(output);  break;
+      case 'error': console.error(output); break;
+      default:      console.log(output);   break;
+    }
   }
 
   debug(message: string, data?: Record<string, unknown>, correlationId?: string): void {

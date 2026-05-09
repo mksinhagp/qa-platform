@@ -38,8 +38,8 @@ export enum BrowserType {
  * Matrix run configuration
  */
 export interface MatrixRunConfig {
-  site_id: string;
-  site_environment_id: string;
+  site_id: number;
+  site_environment_id: number;
   flow_ids: string[];
   persona_ids: string[];
   device_profile_ids: string[];
@@ -55,8 +55,8 @@ export interface MatrixRunConfig {
  */
 export interface Run {
   id: string;
-  site_id: string;
-  site_environment_id: string;
+  site_id: number;
+  site_environment_id: number;
   status: RunStatus;
   config: MatrixRunConfig;
   created_date: Date;

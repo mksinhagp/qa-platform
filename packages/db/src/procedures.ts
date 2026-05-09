@@ -6,6 +6,15 @@
 import { PoolClient } from 'pg';
 import { withTransaction } from './transaction';
 
+const PROC_NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
+
+function buildProcSql(procName: string, placeholders: string): string {
+  if (!PROC_NAME_PATTERN.test(procName)) {
+    throw new Error(`Invalid stored procedure name: ${procName}`);
+  }
+  return `SELECT * FROM public.${procName}(${placeholders})`;
+}
+
 /**
  * Parameters for stored procedure invocation
  * All parameters use snake_case per global rules
@@ -40,7 +49,7 @@ export async function invokeProc<T = Record<string, unknown>>(
   const placeholders = paramKeys.map((_, i) => `$${i + 1}`).join(', ');
 
   // Build the function call: SELECT * FROM schema.proc_name(arg1, arg2, ...)
-  const sql = `SELECT * FROM public.${procName}(${placeholders})`;
+  const sql = buildProcSql(procName, placeholders);
 
   if (useTransaction) {
     return withTransaction(async ({ client }) => {
@@ -69,7 +78,7 @@ export async function invokeProcInTransaction(
   const paramKeys = Object.keys(params);
   const paramValues = Object.values(params);
   const placeholders = paramKeys.map((_, i) => `$${i + 1}`).join(', ');
-  const sql = `SELECT * FROM public.${procName}(${placeholders})`;
+  const sql = buildProcSql(procName, placeholders);
 
   const result = await client.query(sql, paramValues);
 

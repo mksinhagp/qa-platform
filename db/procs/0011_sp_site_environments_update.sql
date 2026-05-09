@@ -8,7 +8,7 @@ CREATE OR REPLACE FUNCTION sp_site_environments_update(
     i_base_url VARCHAR(2048),
     i_description TEXT DEFAULT NULL,
     i_is_active BOOLEAN DEFAULT TRUE,
-    i_updated_by VARCHAR(255)
+    i_updated_by VARCHAR(255) DEFAULT NULL
 )
 RETURNS TABLE(
     o_id INTEGER,

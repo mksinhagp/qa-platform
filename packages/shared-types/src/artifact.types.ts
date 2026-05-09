@@ -21,6 +21,9 @@ export interface Artifact {
   file_path: string;
   file_size_bytes: number;
   created_date: Date;
+  updated_date: Date;
+  created_by: string;
+  updated_by: string;
   is_pinned: boolean;
   retention_days: number;
 }

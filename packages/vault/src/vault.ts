@@ -145,29 +145,18 @@ export async function unlockVault(
     return { success: false };
   }
 
-  // Get vault state from DB (need salt, wrapped_rvk, aad)
-  // Note: We need to add a proc to get these details, for now use a direct query
-  const { getClient } = await import('@qa-platform/db');
-  const client = await getClient();
+  // Get vault crypto material from DB via stored procedure
+  const vaultRows = await invokeProc('sp_vault_state_get_crypto', {});
 
-  const vaultQuery = `
-    SELECT salt, nonce, wrapped_rvk, aad
-    FROM vault_state
-    WHERE wrapped_rvk IS NOT NULL
-    LIMIT 1
-  `;
-
-  const vaultResult = await client.query(vaultQuery);
-
-  if (vaultResult.rows.length === 0) {
+  if (vaultRows.length === 0) {
     return { success: false };
   }
 
-  const row = vaultResult.rows[0];
-  const salt = row.salt;
-  const wrappedRvk = row.wrapped_rvk;
-  const aad = row.aad ? Buffer.from(row.aad, 'utf8') : undefined;
-  const nonce = row.nonce;
+  const row = vaultRows[0];
+  const salt = row.o_salt;
+  const wrappedRvk = row.o_wrapped_rvk;
+  const aad = row.o_aad ? Buffer.from(row.o_aad, 'utf8') : undefined;
+  const nonce = row.o_nonce;
 
   // Derive KEK from master password
   const kek = await deriveKEK(masterPassword, salt);
@@ -266,22 +255,23 @@ export async function withUnlocked<T>(
 export async function encryptSecret(
   unlockToken: string,
   plaintext: Buffer
-): Promise<{ encryptedPayload: Buffer; nonce: Buffer; wrappedDek: Buffer }> {
+): Promise<{ encryptedPayload: Buffer; nonce: Buffer; wrappedDek: Buffer; wrapNonce: Buffer }> {
   return withUnlocked(unlockToken, async (rvk) => {
     const dek = generateDEK();
-    const nonce = generateNonce();
+    const nonce = generateNonce();        // nonce for payload encryption
+    const wrapNonce = generateNonce();    // separate nonce for DEK wrapping
     const aad = Buffer.from('qa-platform-secret-v1', 'utf8');
 
     // Encrypt plaintext with DEK
     const encryptedPayload = await encrypt(plaintext, dek, nonce, aad);
 
-    // Wrap DEK with RVK
-    const wrappedDek = await wrapKey(dek, rvk, nonce, aad);
+    // Wrap DEK with RVK using a separate nonce
+    const wrappedDek = await wrapKey(dek, rvk, wrapNonce, aad);
 
     // Zeroize DEK
     zeroize(dek);
 
-    return { encryptedPayload, nonce, wrappedDek };
+    return { encryptedPayload, nonce, wrappedDek, wrapNonce };
   });
 }
 
@@ -293,16 +283,17 @@ export async function decryptSecret(
   encryptedPayload: Buffer,
   nonce: Buffer,
   wrappedDek: Buffer,
-  aad?: string
+  wrapNonce: Buffer,
+  wrapNonceArg?: Buffer
 ): Promise<Buffer> {
   return withUnlocked(unlockToken, async (rvk) => {
-    const aadBuffer = aad ? Buffer.from(aad, 'utf8') : Buffer.from('qa-platform-secret-v1', 'utf8');
+    const aadBuffer = wrapNonceArg ? wrapNonceArg : Buffer.from('qa-platform-secret-v1', 'utf8');
 
-    // Unwrap DEK with RVK
-    const dek = await unwrapKey(wrappedDek, rvk, nonce, aadBuffer);
+    // Unwrap DEK with RVK using wrap nonce
+    const dek = await unwrapKey(wrappedDek, rvk, wrapNonce, aadBuffer);
 
     try {
-      // Decrypt plaintext with DEK
+      // Decrypt plaintext with DEK using payload nonce
       return await decrypt(encryptedPayload, dek, nonce, aadBuffer);
     } finally {
       // Zeroize DEK

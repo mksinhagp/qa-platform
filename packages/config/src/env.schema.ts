@@ -35,6 +35,7 @@ export const envSchema = z.object({
   RUNNER_PORT: z.coerce.number().int().positive().default(4000),
   RUNNER_API_BASE_URL: z.string().url().default("http://runner:4000"),
   RUNNER_CONCURRENCY_CAP: z.coerce.number().int().positive().default(4),
+  RUNNER_CALLBACK_ALLOWED_ORIGINS: z.string().default("http://dashboard-web:3000,http://localhost:3000"),
 
   // Artifacts
   ARTIFACT_ROOT_PATH: z.string().default("/artifacts"),
@@ -74,6 +75,10 @@ export const envSchema = z.object({
   AUTH_PASSWORD_MIN_LENGTH: z.coerce.number().int().positive().default(8),
   AUTH_PASSWORD_REQUIRE_SPECIAL: z.coerce.boolean().default(true),
   AUTH_PASSWORD_REQUIRE_NUMBER: z.coerce.boolean().default(true),
+
+  // Test-only endpoints
+  E2E_TEST_MODE: z.coerce.boolean().default(false),
+  TEST_SETUP_TOKEN: z.string().optional(),
 
   // Business Rules
   BUSINESS_RULES_PATH: z.string().default("./sites"),

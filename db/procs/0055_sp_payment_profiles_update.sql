@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION sp_payment_profiles_update(
     i_expiry_year INTEGER DEFAULT NULL,
     i_description TEXT DEFAULT NULL,
     i_is_active BOOLEAN DEFAULT NULL,
-    i_updated_by VARCHAR
+    i_updated_by VARCHAR DEFAULT NULL
 )
 RETURNS TABLE (
     o_id INTEGER,

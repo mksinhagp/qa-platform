@@ -10,17 +10,25 @@ let poolInstance: Pool | null = null;
  * Initialize the PostgreSQL connection pool
  * Must be called before any database operations
  */
-export function initializePool(config: PoolConfig): Pool {
+export function initializePool(config?: PoolConfig): Pool {
   if (poolInstance) {
     return poolInstance;
   }
 
+  const sslMode = process.env.POSTGRES_SSL_MODE;
+
   // Default configuration overrides for safety
   const poolConfig: PoolConfig = {
+    host: process.env.POSTGRES_HOST ?? 'postgres',
+    port: process.env.POSTGRES_PORT ? Number(process.env.POSTGRES_PORT) : 5432,
+    database: process.env.POSTGRES_DB ?? 'qa_platform',
+    user: process.env.POSTGRES_USER ?? 'qa_user',
+    password: process.env.POSTGRES_PASSWORD,
     ...config,
-    max: config.max || 20,
-    idleTimeoutMillis: config.idleTimeoutMillis || 30000,
-    connectionTimeoutMillis: config.connectionTimeoutMillis || 2000,
+    ssl: sslMode && sslMode !== 'disable' ? { rejectUnauthorized: sslMode === 'require' } : config?.ssl,
+    max: config?.max || 20,
+    idleTimeoutMillis: config?.idleTimeoutMillis || 30000,
+    connectionTimeoutMillis: config?.connectionTimeoutMillis || 2000,
   };
 
   poolInstance = new Pool(poolConfig);

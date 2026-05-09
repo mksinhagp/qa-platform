@@ -9,7 +9,7 @@ CREATE OR REPLACE FUNCTION sp_payment_profiles_insert(
     i_expiry_year INTEGER DEFAULT NULL,
     i_secret_id INTEGER,
     i_description TEXT DEFAULT NULL,
-    i_created_by VARCHAR
+    i_created_by VARCHAR DEFAULT NULL
 )
 RETURNS TABLE (
     o_id INTEGER,

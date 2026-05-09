@@ -11,7 +11,7 @@ CREATE OR REPLACE FUNCTION sp_secret_records_insert(
     i_wrapped_dek BYTEA,
     i_kdf_version VARCHAR DEFAULT 'v1',
     i_is_session_only BOOLEAN DEFAULT FALSE,
-    i_created_by VARCHAR
+    i_created_by VARCHAR DEFAULT NULL
 )
 RETURNS TABLE (
     o_id INTEGER,

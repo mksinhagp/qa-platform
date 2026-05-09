@@ -20,14 +20,15 @@
     "dev": "tsc --watch",
     "clean": "rm -rf dist",
     "test": "tsx src/test.ts",
-    "migrate": "tsx src/migrations.ts"
+    "migrate": "tsx src/migrations.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "pg": "^8.11.3",
-    "@types/pg": "^8.10.9",
     "@qa-platform/shared-types": "workspace:*"
   },
   "devDependencies": {
+    "@types/pg": "^8.10.9",
     "tsx": "^4.21.0",
     "typescript": "^5.3.3"
   }

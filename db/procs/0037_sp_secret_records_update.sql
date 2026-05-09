@@ -7,7 +7,7 @@ CREATE OR REPLACE FUNCTION sp_secret_records_update(
     i_aad TEXT DEFAULT NULL,
     i_wrapped_dek BYTEA,
     i_description TEXT DEFAULT NULL,
-    i_updated_by VARCHAR
+    i_updated_by VARCHAR DEFAULT NULL
 )
 RETURNS TABLE (
     o_id INTEGER,

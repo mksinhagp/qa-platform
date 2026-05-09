@@ -3,7 +3,7 @@
 
 import { invokeProc } from '@qa-platform/db';
 
-export interface Capability {
+export interface ResolvedCapability {
   capabilityId: number;
   capabilityName: string;
   capabilityCategory: string;
@@ -15,7 +15,7 @@ export interface Capability {
  */
 export async function getCapabilitiesForOperator(
   operatorId: number
-): Promise<Capability[]> {
+): Promise<ResolvedCapability[]> {
   const result = await invokeProc('sp_capabilities_for_operator', {
     i_operator_id: operatorId,
   });

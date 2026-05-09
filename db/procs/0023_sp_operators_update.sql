@@ -6,7 +6,7 @@ CREATE OR REPLACE FUNCTION sp_operators_update(
     i_full_name VARCHAR DEFAULT NULL,
     i_email VARCHAR DEFAULT NULL,
     i_active BOOLEAN DEFAULT NULL,
-    i_updated_by VARCHAR
+    i_updated_by VARCHAR DEFAULT NULL
 )
 RETURNS TABLE (
     o_id INTEGER,
