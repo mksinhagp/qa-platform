@@ -1422,3 +1422,77 @@ Created packages/vault with the following structure:
 - Task 14-15: Integration and E2E tests (high priority)
 
 ---
+
+## May 9, 2026 - Phase 1 Task 10 Completed
+
+### Task 10: Payment profiles CRUD pages (/dashboard/settings/payment-profiles)
+
+**Task Reference**: Master Plan Phase 1, Task 10
+
+#### Work Completed
+
+1. **Created stored procedures for payment profile retrieval and update**
+   - `sp_payment_profiles_get_by_id` (0054): Get payment profile by ID with full metadata
+   - `sp_payment_profiles_update` (0055): Update payment profile metadata (name, expiry, brand, status)
+
+2. **Created payment profiles server actions** (`app/actions/payment-profiles.ts`)
+   - `listPaymentProfiles()`: List all payment profiles with optional type filter
+   - `getPaymentProfile()`: Get single payment profile with metadata
+   - `createPaymentProfile()`: Create new payment profile with encrypted account data
+   - `updatePaymentProfile()`: Update payment profile metadata
+   - Supports both credit cards and ACH bank accounts
+   - Account numbers encrypted in vault, only last-4 stored plaintext
+
+3. **Created payment profiles list page** (`/dashboard/settings/payment-profiles/page.tsx`)
+   - Table showing type (card/ACH icons), name, masked account (•••• last4), expiry, status
+   - CreditCard icon for cards, Landmark icon for ACH
+   - Card brand display (Visa, Mastercard, etc.)
+   - Expiry date display for cards
+   - Active/Inactive status badges
+   - Edit links to detail page
+
+4. **Created new payment profile page** (`/dashboard/settings/payment-profiles/new/page.tsx`)
+   - Payment type selection (Card vs ACH) with visual toggle buttons
+   - For cards: card number, brand dropdown, expiry month/year
+   - For ACH: account number, routing number
+   - Auto-extracts last-4 digits from account number
+   - Profile name and description
+   - Security notice about encryption
+   - Vault unlock required
+
+5. **Created edit payment profile page** (`/dashboard/settings/payment-profiles/[id]/page.tsx`)
+   - Shows payment type and masked account (read-only)
+   - Editable: name, card brand, expiry (for cards), description, active status
+   - Account number cannot be changed (create new profile for different account)
+
+#### Major Decisions
+
+1. **Security model**: Full account numbers are encrypted with AES-256-GCM in the vault. Only the last 4 digits are stored in plaintext for identification purposes.
+
+2. **Payment type support**: Both credit/debit cards and ACH bank accounts are supported. Different fields shown based on type selection.
+
+3. **Account number immutability**: Once created, the account number cannot be changed. Operators must create a new profile if the account changes. This maintains clear audit trails.
+
+4. **Card brand enum**: Supports Visa, Mastercard, American Express, Discover for credit cards.
+
+5. **Expiry handling**: Month (1-12) and year (current year + 10) dropdowns for cards.
+
+6. **Capability requirement**: `site_credentials.manage` required for all operations.
+
+#### Files Changed
+
+- `db/procs/0054_sp_payment_profiles_get_by_id.sql` (new)
+- `db/procs/0055_sp_payment_profiles_update.sql` (new)
+- `apps/dashboard-web/app/actions/payment-profiles.ts` (new)
+- `apps/dashboard-web/app/dashboard/settings/payment-profiles/page.tsx` (updated)
+- `apps/dashboard-web/app/dashboard/settings/payment-profiles/new/page.tsx` (new)
+- `apps/dashboard-web/app/dashboard/settings/payment-profiles/[id]/page.tsx` (new)
+
+#### Next Steps
+
+- Task 11: Email inboxes CRUD pages (medium priority)
+- Task 12: Audit log viewer (medium priority)
+- Task 13: Approval policies viewer (medium priority)
+- Task 14-15: Integration and E2E tests (high priority)
+
+---
