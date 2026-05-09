@@ -15,6 +15,7 @@ RETURNS TABLE (
     o_created_date TIMESTAMP WITH TIME ZONE
 ) AS $$
 BEGIN
+    RETURN QUERY
     INSERT INTO secret_access_logs (
         secret_id, operator_id, operator_session_id,
         access_type, access_reason, run_execution_id,

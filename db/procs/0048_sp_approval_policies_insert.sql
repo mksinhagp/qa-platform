@@ -14,6 +14,7 @@ RETURNS TABLE (
     o_created_date TIMESTAMP WITH TIME ZONE
 ) AS $$
 BEGIN
+    RETURN QUERY
     INSERT INTO approval_policies (
         action_category, default_strength, description,
         is_system, created_by, updated_by

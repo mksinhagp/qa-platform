@@ -160,6 +160,8 @@ export async function createEmailInbox(
       plaintext
     );
 
+    
+
     // Create secret record
     const secretResult = await invokeProcWrite('sp_secret_records_insert', {
       i_category: 'email_password',
@@ -169,7 +171,7 @@ export async function createEmailInbox(
       i_encrypted_payload: encryptedPayload,
       i_nonce: nonce,
       i_wrap_nonce: wrapNonce,
-      i_aad: Buffer.from('qa-platform-secret-v1', 'utf8'),
+      i_aad: 'qa-platform-secret-v1',
       i_wrapped_dek: wrappedDek,
       i_kdf_version: 1,
       i_is_session_only: false,
@@ -257,12 +259,14 @@ export async function updateEmailInbox(
         plaintext
       );
 
+      
+
       await invokeProcWrite('sp_secret_records_update', {
         i_id: secretId,
         i_encrypted_payload: encryptedPayload,
         i_nonce: nonce,
         i_wrap_nonce: wrapNonce,
-        i_aad: Buffer.from('qa-platform-secret-v1', 'utf8'),
+        i_aad: 'qa-platform-secret-v1',
         i_wrapped_dek: wrappedDek,
         i_updated_by: authContext.operatorId?.toString() || 'system',
       });

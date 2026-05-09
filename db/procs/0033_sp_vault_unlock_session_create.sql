@@ -16,6 +16,7 @@ DECLARE
 BEGIN
     v_expires_date := CURRENT_TIMESTAMP + (i_ttl_minutes * INTERVAL '1 minute');
     
+    RETURN QUERY
     INSERT INTO vault_unlock_sessions (
         operator_session_id, unlock_token, expires_date, created_by, updated_by
     )

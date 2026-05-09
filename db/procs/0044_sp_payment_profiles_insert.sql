@@ -19,6 +19,7 @@ RETURNS TABLE (
     o_created_date TIMESTAMP WITH TIME ZONE
 ) AS $$
 BEGIN
+    RETURN QUERY
     INSERT INTO payment_profiles (
         name, payment_type, last_4, card_brand,
         expiry_month, expiry_year, secret_id,

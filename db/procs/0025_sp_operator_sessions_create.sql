@@ -5,8 +5,8 @@ CREATE OR REPLACE FUNCTION sp_operator_sessions_create(
     i_session_token VARCHAR,
     i_ip_address INET DEFAULT NULL,
     i_user_agent TEXT DEFAULT NULL,
-    i_idle_timeout_hours INTEGER DEFAULT 8,
-    i_absolute_timeout_days INTEGER DEFAULT 30,
+    i_idle_timeout_seconds INTEGER DEFAULT 28800,
+    i_absolute_timeout_seconds INTEGER DEFAULT 2592000,
     i_created_by VARCHAR DEFAULT 'system'
 )
 RETURNS TABLE (
@@ -18,8 +18,9 @@ RETURNS TABLE (
 DECLARE
     v_expires_date TIMESTAMP WITH TIME ZONE;
 BEGIN
-    v_expires_date := CURRENT_TIMESTAMP + (i_absolute_timeout_days * INTERVAL '1 day');
-    
+    v_expires_date := CURRENT_TIMESTAMP + (i_absolute_timeout_seconds * INTERVAL '1 second');
+
+    RETURN QUERY
     INSERT INTO operator_sessions (
         operator_id, session_token, ip_address, user_agent,
         expires_date, created_by, updated_by

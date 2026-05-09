@@ -10,14 +10,19 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(formData: FormData) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
     setError(null);
     setLoading(true);
 
+    const formData = new FormData(e.currentTarget);
     const loginValue = formData.get('login') as string;
     const password = formData.get('password') as string;
 
+    console.log('Submitting login for:', loginValue);
+
     const result = await login(loginValue, password);
+    console.log('Login result:', result);
 
     setLoading(false);
 
@@ -39,7 +44,7 @@ export default function LoginPage() {
           </div>
         )}
 
-        <form action={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="login" className="block text-sm font-medium text-zinc-700 mb-1">
               Login

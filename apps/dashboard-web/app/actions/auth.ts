@@ -4,8 +4,17 @@ import { cookies } from 'next/headers';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { verifyPassword, createSession, revokeSession, hashPassword } from '@qa-platform/auth';
-import { invokeProc } from '@qa-platform/db';
+import { invokeProc, initializePool } from '@qa-platform/db';
 import { getEnv, loadEnv } from '@qa-platform/config';
+
+// Load env and initialize PostgreSQL pool for server actions
+try {
+  loadEnv();
+  initializePool();
+  console.log('PostgreSQL pool initialized successfully');
+} catch (error) {
+  console.error('Failed to initialize PostgreSQL pool:', error);
+}
 
 export interface LoginResult {
   success: boolean;
@@ -26,10 +35,12 @@ export async function login(
   password: string
 ): Promise<LoginResult> {
   try {
+    console.log('Login attempt for:', login);
     // Get operator by login
     const result = await invokeProc('sp_operators_get_by_login', {
       i_login: login,
     });
+    console.log('Operator query result:', result.length, 'rows');
 
     if (result.length === 0) {
       // Perform a dummy verify to prevent timing-based login enumeration

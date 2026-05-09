@@ -17,6 +17,7 @@ RETURNS TABLE (
     o_created_date TIMESTAMP WITH TIME ZONE
 ) AS $$
 BEGIN
+    RETURN QUERY
     INSERT INTO operators (login, password_hash, full_name, email, active, created_by, updated_by)
     VALUES (i_login, i_password_hash, i_full_name, i_email, i_active, i_created_by, i_created_by)
     RETURNING

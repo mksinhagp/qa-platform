@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Lock, Unlock, AlertCircle } from 'lucide-react';
-import { lockVaultAction, isVaultUnlocked } from '../app/actions/vault';
+import { lockVaultAction, isVaultUnlocked, getVaultStateAction } from '../app/actions/vault';
 
 export function VaultStatePill() {
   const router = useRouter();
@@ -16,10 +16,9 @@ export function VaultStatePill() {
       const unlocked = await isVaultUnlocked();
       setIsUnlocked(unlocked);
 
-      // Check if bootstrapped by trying to get vault state
+      // Check if bootstrapped using server action
       try {
-        const { getVaultState } = await import('@qa-platform/vault');
-        const state = await getVaultState();
+        const state = await getVaultStateAction();
         setIsBootstrapped(state.isBootstrapped);
       } catch (error) {
         setIsBootstrapped(false);

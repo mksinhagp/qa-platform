@@ -16,6 +16,7 @@ RETURNS TABLE (
     o_created_date TIMESTAMP WITH TIME ZONE
 ) AS $$
 BEGIN
+    RETURN QUERY
     INSERT INTO site_credentials (
         site_id, site_environment_id, role_name, secret_id,
         description, created_by, updated_by

@@ -31,6 +31,7 @@ RETURNS TABLE(
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    RETURN QUERY
     INSERT INTO audit_logs (
         actor_type,
         actor_id,

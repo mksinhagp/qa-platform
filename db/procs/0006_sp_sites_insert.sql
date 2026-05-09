@@ -23,6 +23,7 @@ RETURNS TABLE(
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    RETURN QUERY
     INSERT INTO sites (
         name,
         base_url,

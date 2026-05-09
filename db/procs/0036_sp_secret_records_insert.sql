@@ -4,11 +4,12 @@ CREATE OR REPLACE FUNCTION sp_secret_records_insert(
     i_category VARCHAR,
     i_owner_scope VARCHAR,
     i_name VARCHAR,
-    i_description TEXT DEFAULT NULL,
     i_encrypted_payload BYTEA,
     i_nonce BYTEA,
-    i_aad TEXT DEFAULT NULL,
     i_wrapped_dek BYTEA,
+    i_wrap_nonce BYTEA,
+    i_description TEXT DEFAULT NULL,
+    i_aad TEXT DEFAULT NULL,
     i_kdf_version VARCHAR DEFAULT 'v1',
     i_is_session_only BOOLEAN DEFAULT FALSE,
     i_created_by VARCHAR DEFAULT NULL
@@ -21,15 +22,12 @@ RETURNS TABLE (
     o_created_date TIMESTAMP WITH TIME ZONE
 ) AS $$
 BEGIN
+    RETURN QUERY
     INSERT INTO secret_records (
-        category, owner_scope, name, description,
-        encrypted_payload, nonce, aad, wrapped_dek,
-        kdf_version, is_session_only, created_by, updated_by
+        category, owner_scope, name, encrypted_payload, nonce, wrapped_dek, wrap_nonce, aad, description, kdf_version, is_session_only, created_by, updated_by
     )
     VALUES (
-        i_category, i_owner_scope, i_name, i_description,
-        i_encrypted_payload, i_nonce, i_aad, i_wrapped_dek,
-        i_kdf_version, i_is_session_only, i_created_by, i_created_by
+        i_category, i_owner_scope, i_name, i_encrypted_payload, i_nonce, i_wrapped_dek, i_wrap_nonce, i_aad, i_description, i_kdf_version, i_is_session_only, i_created_by, i_created_by
     )
     RETURNING
         id AS o_id,

@@ -11,7 +11,7 @@ RETURNS TABLE (
 BEGIN
     RETURN QUERY
     SELECT
-        vs.salt        AS o_salt,
+        vs.kdf_salt    AS o_salt,
         vs.nonce       AS o_nonce,
         vs.wrapped_rvk AS o_wrapped_rvk,
         vs.aad         AS o_aad

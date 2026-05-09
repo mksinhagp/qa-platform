@@ -20,6 +20,7 @@ RETURNS TABLE (
     o_created_date TIMESTAMP WITH TIME ZONE
 ) AS $$
 BEGIN
+    RETURN QUERY
     INSERT INTO email_inboxes (
         name, provider, host, port, use_tls,
         username, secret_id, description,

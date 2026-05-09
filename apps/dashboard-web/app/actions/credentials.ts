@@ -1,7 +1,7 @@
 'use server';
 
 import { cookies } from 'next/headers';
-import { invokeProc, invokeProcWrite } from '@qa-platform/db';
+import { invokeProc, invokeProcWrite, invokeProcInTransaction, withTransaction } from '@qa-platform/db';
 import { requireCapability, requireOperator } from '@qa-platform/auth';
 import { encryptSecret, decryptSecret, withUnlocked } from '@qa-platform/vault';
 import { logAudit } from './audit';
@@ -229,38 +229,40 @@ export async function createCredential(
       plaintext
     );
 
-    // Create secret record (transactional)
-    const secretResult = await invokeProcWrite('sp_secret_records_insert', {
-      i_category: 'site_credential',
-      i_owner_scope: `site:${input.site_id}`,
-      i_name: input.name,
-      i_description: input.description || null,
-      i_encrypted_payload: encryptedPayload,
-      i_nonce: nonce,
-      i_wrap_nonce: wrapNonce,
-      i_aad: Buffer.from('qa-platform-secret-v1', 'utf8'),
-      i_wrapped_dek: wrappedDek,
-      i_kdf_version: 1,
-      i_is_session_only: input.is_session_only ?? false,
-      i_created_by: authContext.operatorId?.toString() || 'system',
+    const createdBy = authContext.operatorId?.toString() || 'system';
+
+    // Both inserts must be atomic — use a single shared transaction
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const [secretResult, credResult] = await withTransaction(async ({ client }: { client: any }) => {
+      const secret = await invokeProcInTransaction(client, 'sp_secret_records_insert', [
+        'site_credential',                // i_category
+        `site:${input.site_id}`,          // i_owner_scope
+        input.name,                       // i_name
+        encryptedPayload,                 // i_encrypted_payload (bytea)
+        nonce,                            // i_nonce (bytea)
+        wrappedDek,                       // i_wrapped_dek (bytea)
+        wrapNonce,                        // i_wrap_nonce (bytea)
+        input.description || null,        // i_description
+        'qa-platform-secret-v1',          // i_aad
+        'v1',                             // i_kdf_version
+        input.is_session_only ?? false,   // i_is_session_only
+        createdBy,                        // i_created_by
+      ]);
+      if (secret.rows.length === 0) throw new Error('Failed to create secret');
+      const secretId = secret.rows[0].o_id;
+      const cred = await invokeProcInTransaction(client, 'sp_site_credentials_insert', [
+        input.site_id,                    // i_site_id
+        input.site_environment_id,        // i_site_environment_id
+        input.role_name,                  // i_role_name
+        secretId,                         // i_secret_id
+        input.description || null,        // i_description
+        createdBy,                        // i_created_by
+      ]);
+      if (cred.rows.length === 0) throw new Error('Failed to create credential');
+      return [secret.rows, cred.rows];
     });
 
-    if (secretResult.length === 0) {
-      return { success: false, error: 'Failed to create secret' };
-    }
-
-    const secretId = secretResult[0].o_id;
-
-    // Create site credential reference (transactional)
-    const credResult = await invokeProcWrite('sp_site_credentials_insert', {
-      i_site_id: input.site_id,
-      i_site_environment_id: input.site_environment_id,
-      i_role_name: input.role_name,
-      i_secret_id: secretId,
-      i_created_by: authContext.operatorId?.toString() || 'system',
-    });
-
-    if (credResult.length === 0) {
+    if (secretResult.length === 0 || credResult.length === 0) {
       return { success: false, error: 'Failed to create credential' };
     }
 
@@ -320,12 +322,14 @@ export async function updateCredential(
         plaintext
       );
 
+      
+
       await invokeProcWrite('sp_secret_records_update', {
         i_id: secretId,
         i_encrypted_payload: encryptedPayload,
         i_nonce: nonce,
         i_wrap_nonce: wrapNonce,
-        i_aad: Buffer.from('qa-platform-secret-v1', 'utf8'),
+        i_aad: 'qa-platform-secret-v1',
         i_wrapped_dek: wrappedDek,
         i_updated_by: authContext.operatorId?.toString() || 'system',
       });

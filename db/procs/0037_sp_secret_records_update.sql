@@ -4,8 +4,9 @@ CREATE OR REPLACE FUNCTION sp_secret_records_update(
     i_id INTEGER,
     i_encrypted_payload BYTEA,
     i_nonce BYTEA,
-    i_aad TEXT DEFAULT NULL,
     i_wrapped_dek BYTEA,
+    i_wrap_nonce BYTEA,
+    i_aad TEXT DEFAULT NULL,
     i_description TEXT DEFAULT NULL,
     i_updated_by VARCHAR DEFAULT NULL
 )
@@ -19,8 +20,9 @@ BEGIN
     SET
         encrypted_payload = i_encrypted_payload,
         nonce = i_nonce,
-        aad = COALESCE(i_aad, aad),
         wrapped_dek = i_wrapped_dek,
+        wrap_nonce = i_wrap_nonce,
+        aad = COALESCE(i_aad, aad),
         description = COALESCE(i_description, description),
         updated_date = CURRENT_TIMESTAMP,
         updated_by = i_updated_by

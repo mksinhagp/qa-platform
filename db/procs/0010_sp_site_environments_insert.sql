@@ -25,6 +25,7 @@ RETURNS TABLE(
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    RETURN QUERY
     INSERT INTO site_environments (
         site_id,
         name,
