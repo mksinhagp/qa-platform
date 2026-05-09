@@ -2364,3 +2364,155 @@ Phase 2 implemented the site management surface of the QA platform, covering the
 Proceed to Phase 3: Test runner, persona management, and run scheduling.
 
 ---
+
+## May 9, 2026 – Phase 3 Complete
+
+### Milestone Reached
+
+**Date**: May 9, 2026
+**Tag**: v0.3.0
+
+### Phase 3 Summary
+
+Phase 3 implemented the core Playwright runner engine, persona-aware execution infrastructure, run management UI, and the confusion/friction telemetry layer.
+
+---
+
+### Task 1: packages/personas — v1 Library
+
+**Files created**:
+- `packages/personas/package.json` — `@qa-platform/personas` ESM package
+- `packages/personas/tsconfig.json` — declaration + declarationMap enabled
+- `packages/personas/src/library.ts` — `V1_PERSONAS` array (6 seeded first-class personas) + query helpers
+- `packages/personas/src/oracles.ts` — persona-aware oracle helpers (keyboardOnly, largeTargets, simpleCopy, completionMs, frictionTimeout, abandonmentTriggers)
+- `packages/personas/src/index.ts` — barrel export
+
+**DB seed**:
+- `db/migrations/0011_persona_seed.sql` — inserts 6 personas, 6 device profiles, 4 network profiles (idempotent via ON CONFLICT DO NOTHING)
+
+**Personas seeded**:
+1. `confident_desktop` — Alex, 34, tech-savvy, fast desktop, baseline
+2. `average_mobile` — Maria, 28, iPhone, distracted, normal network
+3. `elderly_first_time` — Eleanor, 72, tablet, 400% zoom, slow typing, abandons on captcha
+4. `low_literacy_slow` — Carlos, 41, grade-4 comprehension, second language
+5. `screen_reader_user` — Jordan, 38, keyboard-only, NVDA-style
+6. `motor_impaired_tremor` — Sam, 52, hand tremor, needs 44px+ targets
+
+---
+
+### Task 2: packages/playwright-core — Persona-Aware Execution Engine
+
+**Files created**:
+- `packages/playwright-core/package.json` — `@qa-platform/playwright-core` with exports field
+- `packages/playwright-core/tsconfig.json` — lib includes DOM for window/globalThis
+- `packages/playwright-core/src/typing.ts` — `personaType()` (WPM-calibrated, adjacent-key typos + correction), `personaHesitate()` (reading-time model), `personaClick()` (tremor jitter for motor_impaired)
+- `packages/playwright-core/src/context.ts` — `createPersonaContext()` (viewport, touch, forced-colors, reduced-motion, zoom_400 shrink, CDP network throttling, route-level fallback for Firefox/WebKit)
+- `packages/playwright-core/src/accessibility.ts` — `checkAccessibleLabels()`, `checkFocusOrder()`, `checkTapTargets()` (44px WCAG 2.5.5), `checkReadability()` (Flesch-Kincaid), `runPersonaAccessibilityCheck()` dispatcher
+- `packages/playwright-core/src/friction.ts` — `FrictionCollector` class (12 signal types, weighted 0–100 score, `isFrictionFlagged()` at ≥ 30), `installScrollUpDetector()`
+- `packages/playwright-core/src/runner.ts` — `PersonaRunner` (setup, executeFlow, type, click, hesitate, goto, checkAccessibility, teardown), `ExecutionResult` type
+- `packages/playwright-core/src/index.ts` — barrel export
+
+---
+
+### Task 3: Runner Service — Real Playwright Execution
+
+**Files updated**:
+- `apps/runner/src/execution-manager.ts` — `ExecutionManager` with concurrency cap (default 4), queue drain loop, per-execution PersonaRunner lifecycle, result callback via fetch, `startRun()` / `getActiveManager()` module singletons
+- `apps/runner/src/index.ts` — replaced stub: `POST /run` (202 Accepted, async execution), `POST /abort`, `GET /status`, `GET /health` (includes busy/active_run_id)
+- `apps/runner/tsconfig.json` — updated to extend root tsconfig (bundler module resolution, consistent with workspace)
+- `apps/runner/package.json` — added `@qa-platform/playwright-core` and `@qa-platform/personas` workspace dependencies
+
+---
+
+### Task 4: DB Migrations + Stored Procedures
+
+**Migrations**:
+- `db/migrations/0012_friction_telemetry_table.sql` — `friction_signals` table (signal_type, step_name, element_selector, metadata JSONB, occurred_at)
+
+**Stored procedures** (0067–0079):
+- `0067` `sp_runs_insert` — creates draft run with JSONB config
+- `0068` `sp_runs_update_status` — updates status + optional timing
+- `0069` `sp_runs_list` — paginated list with site/env JOINs, pinned-first
+- `0070` `sp_runs_get_by_id` — full run + config + JOINs
+- `0071` `sp_run_executions_insert` — creates queued execution
+- `0072` `sp_run_executions_update_status` — updates status, timing, friction score, error
+- `0073` `sp_run_executions_list` — enriched list with persona/device/network display names
+- `0074` `sp_run_steps_insert` — creates pending step
+- `0075` `sp_run_steps_update` — updates step status, timing, error, details JSONB
+- `0076` `sp_run_steps_list` — ordered by step_order
+- `0077` `sp_runs_update_counters` — recalculates total/passed/failed/skipped on parent run
+- `0078` `sp_friction_signals_insert`
+- `0079` `sp_friction_signals_list`
+
+---
+
+### Task 5: Server Actions — runs module
+
+**File**: `apps/dashboard-web/app/actions/runs.ts`
+
+Actions:
+- `listPersonaOptions()` — calls sp_personas_list, requires run.execute
+- `listDeviceProfileOptions()` — calls sp_device_profiles_list
+- `listNetworkProfileOptions()` — calls sp_network_profiles_list
+- `listRuns(siteId?, status?)` — calls sp_runs_list, requires run.read
+- `getRun(id)` — calls sp_runs_get_by_id, parses config JSONB
+- `listRunExecutions(runId)` — calls sp_run_executions_list, parses friction_score
+- `createRun(data)` — Zod-validated, calls sp_runs_insert, stores config as JSON, requires run.execute
+- `updateRunStatus(id, status, options?)` — calls sp_runs_update_status
+- `abortRun(id)` — sets status=aborted with completed_at timestamp
+
+---
+
+### Task 6: Dashboard UI
+
+**Files replaced** (stub → functional):
+- `apps/dashboard-web/app/dashboard/runs/page.tsx` — data-driven table, 7-status badge with animated running indicator, exec counts, empty/loading/error states
+- `apps/dashboard-web/app/dashboard/runs/new/page.tsx` — 3-step matrix-run wizard: (1) Site + Env + Run name, (2) Execution matrix multi-select (personas/browsers/devices/networks/flows) with live count estimate, (3) Review + Create
+- `apps/dashboard-web/app/dashboard/runs/[runId]/page.tsx` — run detail with summary cards, executions table, Start/Abort controls, 5-second auto-refresh for active runs
+- `apps/dashboard-web/app/dashboard/personas/page.tsx` — 3-column card grid, per-persona badges for age/device/assistive-tech/motor profile
+
+---
+
+### Task 7: Confusion / Friction Telemetry
+
+Implemented in `packages/playwright-core/src/friction.ts` (see Task 2 above):
+- 12 signal types with severity weights
+- `FrictionCollector` attached per execution — records signals, calculates 0–100 score
+- Scroll-up-after-submit detector via page request listener + scroll polling
+- `isFrictionFlagged()` threshold at score ≥ 30 → maps to `friction_flagged` execution status
+
+---
+
+### Task 8: Integration Tests — runs actions
+
+**File**: `apps/dashboard-web/app/actions/runs.test.ts`
+
+22 tests covering: listRuns (4), getRun (3), listRunExecutions (3), createRun (4), updateRunStatus (2), abortRun (1), listPersonaOptions (2), listDeviceProfileOptions (1), listNetworkProfileOptions (2).
+
+---
+
+### Exit Criteria Met
+
+- `packages/personas` builds cleanly with TypeScript declarations emitted
+- `packages/playwright-core` builds cleanly with TypeScript declarations emitted
+- `apps/runner` builds cleanly (updated tsconfig, new execution-manager)
+- `apps/dashboard-web` TypeScript passes with zero errors
+- All 122 integration tests pass (9 test files: +22 new runs tests)
+- All 6 v1 personas seeded idempotently via migration 0011
+- All 13 Phase 3 stored procedures created (0067–0079)
+- Friction telemetry wired end-to-end: collector → signals → score → execution status
+- Run management UI fully implemented (list, wizard, detail, personas page)
+
+### Commits
+
+- Phase 3: Persona engine, playwright-core, runner, run management UI
+
+### Next Steps (Phase 4)
+
+- Real flow templates: registration → login → browse in `sites/<siteId>/flows/`
+- Approval engine integration: pause runner on approval-required steps, dashboard approval cards
+- Email validation module: IMAP, delivery confirmation, link extraction, render fidelity
+- LLM failure-explanation block (Ollama integration)
+- Artifact retention cleanup job
+
+---
