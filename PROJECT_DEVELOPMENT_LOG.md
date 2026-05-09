@@ -1496,3 +1496,114 @@ Created packages/vault with the following structure:
 - Task 14-15: Integration and E2E tests (high priority)
 
 ---
+
+## May 9, 2026 - Phase 1 Tasks 11-12 Completed
+
+### Task 11: Email Inboxes CRUD pages (/dashboard/settings/email-inboxes)
+
+**Task Reference**: Master Plan Phase 1, Task 11
+
+#### Work Completed
+
+1. **Created stored procedures for email inbox retrieval and update**
+   - `sp_email_inboxes_get_by_id` (0056): Get email inbox by ID with full configuration
+   - `sp_email_inboxes_update` (0057): Update email inbox settings and optional password
+
+2. **Created email inboxes server actions** (`app/actions/email-inboxes.ts`)
+   - `listEmailInboxes()`: List all email inboxes with provider filtering
+   - `getEmailInbox()`: Get single email inbox configuration
+   - `createEmailInbox()`: Create new email inbox with encrypted password
+   - `updateEmailInbox()`: Update email settings with optional password change
+   - Supports Gmail, Microsoft 365, IMAP, and Custom providers
+
+3. **Created email inboxes list page** (`/dashboard/settings/email-inboxes/page.tsx`)
+   - Table showing provider icon, name, server (host:port), username, status
+   - Provider icons: Gmail (red), Microsoft 365 (blue), IMAP/Custom (gray)
+   - TLS indicator (Shield icon)
+   - Active/Inactive status badges
+
+4. **Created new email inbox page** (`/dashboard/settings/email-inboxes/new/page.tsx`)
+   - Provider selection grid (Gmail, Microsoft 365, IMAP, Custom)
+   - Auto-fills host/port based on provider selection
+   - Provider presets: Gmail (imap.gmail.com:993), Microsoft (outlook.office365.com:993)
+   - IMAP host, port, TLS toggle
+   - Username and password fields
+   - Security note about app-specific passwords
+
+5. **Created edit email inbox page** (`/dashboard/settings/email-inboxes/[id]/page.tsx`)
+   - Shows provider icon and name in header
+   - Editable: host, port, TLS, username, password (optional)
+   - Read-only: provider type
+   - Active/inactive toggle
+
+#### Major Decisions
+
+1. **Provider presets**: Selecting Gmail or Microsoft auto-fills the IMAP host and port. Custom allows full configuration.
+
+2. **Password encryption**: Email passwords are encrypted with AES-256-GCM in the vault. Only configuration (host, port, username) is stored in plaintext.
+
+3. **App-specific passwords**: UI warns users to use app-specific passwords rather than main account passwords for Gmail/Microsoft.
+
+4. **Provider immutability**: Once created, the provider type cannot be changed. Different providers have different configuration requirements.
+
+---
+
+### Task 12: Audit Log Viewer (/dashboard/audit)
+
+**Task Reference**: Master Plan Phase 1, Task 12
+
+#### Work Completed
+
+1. **Completed audit server actions** (`app/actions/audit.ts`)
+   - `logAudit()`: Log audit events (already existed as placeholder)
+   - `queryAuditLogs()`: Query audit logs with filters (actor_id, action, target, status)
+   - Returns structured audit entries with all fields
+
+2. **Created audit log viewer page** (`/dashboard/audit/page.tsx`)
+   - Filter panel with 4 filter inputs:
+     - Actor ID (operator identifier)
+     - Action (e.g., login, vault.unlock, credential.create)
+     - Target (e.g., credential:123, operator:5)
+     - Status dropdown (All, Success, Failure, Error)
+   - Refresh button with loading spinner
+   - Apply Filters button to execute search
+
+3. **Audit log table columns**:
+   - Timestamp (formatted as locale string)
+   - Actor (type:id badge)
+   - Action (action name)
+   - Target (code-formatted resource identifier)
+   - Status (colored badge with icon)
+   - Details (JSON details, truncated)
+
+4. **Status visualization**:
+   - Success: Green badge with CheckCircle icon
+   - Failure: Red badge with XCircle icon
+   - Error: Amber badge with AlertCircle icon
+
+#### Major Decisions
+
+1. **Filter-first approach**: Audit logs are not loaded on initial page load. Users must apply filters to see results (privacy/security consideration).
+
+2. **Status color coding**: Consistent color scheme across the platform for status indicators (green=success, red=failure, amber=warning/error).
+
+3. **Limited result set**: Returns maximum 100 records per query to prevent performance issues with large audit tables.
+
+4. **JSON details**: Details column shows JSON-serialized additional data (truncated). Full details view can be added in future if needed.
+
+#### Files Changed
+
+- `db/procs/0056_sp_email_inboxes_get_by_id.sql` (new)
+- `db/procs/0057_sp_email_inboxes_update.sql` (new)
+- `apps/dashboard-web/app/actions/email-inboxes.ts` (new)
+- `apps/dashboard-web/app/dashboard/settings/email-inboxes/page.tsx` (updated)
+- `apps/dashboard-web/app/dashboard/settings/email-inboxes/new/page.tsx` (new)
+- `apps/dashboard-web/app/dashboard/settings/email-inboxes/[id]/page.tsx` (new)
+- `apps/dashboard-web/app/dashboard/audit/page.tsx` (updated)
+
+#### Next Steps
+
+- Task 13: Approval policies viewer (medium priority)
+- Task 14-15: Integration and E2E tests (high priority)
+
+---
