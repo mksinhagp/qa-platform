@@ -16,11 +16,13 @@ export interface TransactionContext {
  * Automatically commits on success, rolls back on error
  * Ensures client is always released back to pool
  */
+type TransactionState = 'active' | 'committed' | 'rolled_back';
+
 export async function withTransaction<T>(
   callback: (context: TransactionContext) => Promise<T>
 ): Promise<T> {
   const client = await getClient();
-  let committed = false;
+  let state: TransactionState = 'active';
 
   try {
     await client.query('BEGIN');
@@ -28,33 +30,38 @@ export async function withTransaction<T>(
     const context: TransactionContext = {
       client,
       async commit() {
-        if (!committed) {
-          await client.query('COMMIT');
-          committed = true;
+        if (state === 'committed') return;
+        if (state === 'rolled_back') {
+          throw new Error('Cannot commit: transaction has already been rolled back');
         }
+        await client.query('COMMIT');
+        state = 'committed';
       },
       async rollback() {
-        if (!committed) {
-          await client.query('ROLLBACK');
-          committed = true;
+        if (state === 'rolled_back') return;
+        if (state === 'committed') {
+          throw new Error('Cannot rollback: transaction has already been committed');
         }
+        await client.query('ROLLBACK');
+        state = 'rolled_back';
       },
     };
 
     const result = await callback(context);
 
     // Auto-commit if callback didn't explicitly commit/rollback
-    if (!committed) {
+    if (state === 'active') {
       await client.query('COMMIT');
-      committed = true;
+      state = 'committed';
     }
 
     return result;
   } catch (error) {
     // Rollback on any error
-    if (!committed) {
+    if (state === 'active') {
       try {
         await client.query('ROLLBACK');
+        state = 'rolled_back';
       } catch (rollbackError) {
         console.error('Failed to rollback transaction:', rollbackError);
       }

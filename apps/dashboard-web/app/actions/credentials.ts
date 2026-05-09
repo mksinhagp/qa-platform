@@ -76,7 +76,16 @@ export async function listCredentials(
       i_site_environment_id: siteEnvironmentId ?? null,
     });
 
-    const credentials: Credential[] = result.map((row) => ({
+    const credentials: Credential[] = result.map((row: {
+      o_id: number;
+      o_site_id: number | null;
+      o_site_environment_id: number | null;
+      o_role_name: string;
+      o_secret_id: number;
+      o_is_active: boolean;
+      o_created_date: string;
+      o_updated_date: string;
+    }) => ({
       id: row.o_id,
       site_id: row.o_site_id,
       site_environment_id: row.o_site_environment_id,
@@ -334,24 +343,38 @@ export async function updateCredential(
   }
 }
 
-// Placeholder audit log function - will be implemented in Task 12
-async function logAudit(params: {
-  action: string;
-  target: string;
-  status: string;
-  details?: Record<string, unknown>;
-}) {
+// ─── Secret records (vault-stored secrets, for use in binding dropdowns) ─────
+
+export interface SecretRecord {
+  id: number;
+  name: string;
+  category: string;
+  owner_scope: string | null;
+  description: string | null;
+  is_session_only: boolean;
+  is_active: boolean;
+}
+
+export async function listSecretRecords(
+  ownerScope?: string
+): Promise<{ success: boolean; secrets?: SecretRecord[]; error?: string }> {
   try {
-    const authContext = await requireOperator();
-    await invokeProc('sp_audit_logs_insert', {
-      i_actor_type: 'operator',
-      i_actor_id: authContext.operatorId?.toString() || 'system',
-      i_action: params.action,
-      i_target: params.target,
-      i_status: params.status,
-      i_details: params.details ? JSON.stringify(params.details) : null,
+    await requireOperator();
+    const result = await invokeProc('sp_secret_records_list', {
+      i_owner_scope: ownerScope ?? null,
+      i_category: null,
+      i_is_session_only: null,
     });
+    const secrets: SecretRecord[] = result.map((row: {
+      o_id: number; o_name: string; o_category: string; o_owner_scope: string | null;
+      o_description: string | null; o_is_session_only: boolean; o_is_active: boolean;
+    }) => ({
+      id: row.o_id, name: row.o_name, category: row.o_category, owner_scope: row.o_owner_scope,
+      description: row.o_description, is_session_only: row.o_is_session_only, is_active: row.o_is_active,
+    }));
+    return { success: true, secrets };
   } catch (error) {
-    console.error('Audit log error:', error);
+    console.error('List secret records error:', error);
+    return { success: false, error: 'Failed to list secret records' };
   }
 }

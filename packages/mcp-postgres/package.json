@@ -1,0 +1,24 @@
+{
+  "name": "@qa-platform/mcp-postgres",
+  "version": "1.0.0",
+  "description": "Custom MCP server for PostgreSQL with full read/write access",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "mcp-postgres": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/pg": "^8.11.10",
+    "typescript": "^5.7.2"
+  }
+}

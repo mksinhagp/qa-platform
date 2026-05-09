@@ -10,15 +10,32 @@ const TEST_OPERATOR = {
 
 const MASTER_PASSWORD = 'MasterVaultPassword123!';
 
+// API base URL for test setup
+const API_BASE = 'http://localhost:3000';
+
 // Helper function to create operator via API
 async function createTestOperator() {
-  // This would call the server action directly or via API
-  // For now, we assume the operator is created via setup
+  // Use direct DB call via API endpoint or server action
+  const response = await fetch(`${API_BASE}/api/test/setup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      action: 'createOperator',
+      operator: TEST_OPERATOR
+    }),
+  });
+  if (!response.ok) {
+    console.log('Operator may already exist, continuing...');
+  }
 }
 
 // Helper to reset vault state
 async function resetVaultState() {
-  // Would reset vault to unbootstrapped state for testing
+  await fetch(`${API_BASE}/api/test/setup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'resetVault' }),
+  });
 }
 
 test.describe('Smoke Tests - Vault and Auth Flow', () => {
@@ -41,11 +58,11 @@ test.describe('Smoke Tests - Vault and Auth Flow', () => {
     
     // Step 3: Navigate to login page
     await page.goto('/login');
-    
+
     // Login with operator credentials
-    await page.fill('input[type="text"]', TEST_OPERATOR.login);
-    await page.fill('input[type="password"]', TEST_OPERATOR.password);
-    await page.click('button:has-text("Sign in")');
+    await page.fill('input#login', TEST_OPERATOR.login);
+    await page.fill('input#password', TEST_OPERATOR.password);
+    await page.click('button:has-text("Login")');
     
     // Should redirect to dashboard
     await expect(page).toHaveURL('/dashboard');
@@ -53,16 +70,16 @@ test.describe('Smoke Tests - Vault and Auth Flow', () => {
     // Step 4: Unlock vault
     await page.goto('/unlock');
     await expect(page.locator('h1')).toContainText('Unlock Vault');
-    
-    await page.fill('input[type="password"]', MASTER_PASSWORD);
-    await page.click('button:has-text("Unlock Vault")');
+
+    await page.fill('input#masterPassword', MASTER_PASSWORD);
+    await page.click('button:has-text("Unlock")');
     
     // Should redirect to dashboard
     await expect(page).toHaveURL('/dashboard');
     
-    // Verify vault is unlocked (vault pill should show "Unlocked")
+    // Verify vault is unlocked (vault pill should show "unlocked")
     const vaultPill = page.locator('[data-testid="vault-state-pill"]').first();
-    await expect(vaultPill).toContainText('Unlocked');
+    await expect(vaultPill).toContainText('unlocked');
     
     // Step 5: Create a saved credential
     await page.goto('/dashboard/settings/credentials/new');
@@ -86,10 +103,10 @@ test.describe('Smoke Tests - Vault and Auth Flow', () => {
     
     // Step 6: Lock vault
     // Click lock button on vault pill
-    await page.click('[data-testid="lock-vault-button"]');
-    
+    await page.locator('[data-testid="lock-vault-button"]').click();
+
     // Verify vault shows as locked
-    await expect(vaultPill).toContainText('Locked');
+    await expect(vaultPill).toContainText('locked');
     
     // Step 7: Attempt to reveal credential - should be denied
     // Try to view the credential
@@ -108,14 +125,14 @@ test.describe('Smoke Tests - Vault and Auth Flow', () => {
 
   test('login with invalid credentials shows error', async ({ page }) => {
     await page.goto('/login');
-    
-    await page.fill('input[type="text"]', 'invalid-user');
-    await page.fill('input[type="password"]', 'wrong-password');
-    await page.click('button:has-text("Sign in")');
-    
+
+    await page.fill('input#login', 'invalid-user');
+    await page.fill('input#password', 'wrong-password');
+    await page.click('button:has-text("Login")');
+
     // Should show error message
     await expect(page.locator('text=Invalid login or password')).toBeVisible();
-    
+
     // Should stay on login page
     await expect(page).toHaveURL('/login');
   });
@@ -128,17 +145,17 @@ test.describe('Smoke Tests - Vault and Auth Flow', () => {
     await page.click('button:has-text("Bootstrap Vault")');
     
     await page.goto('/login');
-    await page.fill('input[type="text"]', TEST_OPERATOR.login);
-    await page.fill('input[type="password"]', TEST_OPERATOR.password);
-    await page.click('button:has-text("Sign in")');
-    
+    await page.fill('input#login', TEST_OPERATOR.login);
+    await page.fill('input#password', TEST_OPERATOR.password);
+    await page.click('button:has-text("Login")');
+
     // Try to unlock with wrong password
     await page.goto('/unlock');
-    await page.fill('input[type="password"]', 'wrong-master-password');
-    await page.click('button:has-text("Unlock Vault")');
+    await page.fill('input#masterPassword', 'wrong-master-password');
+    await page.click('button:has-text("Unlock")');
     
     // Should show error
-    await expect(page.locator('text=Failed to unlock')).toBeVisible();
+    await expect(page.locator('text=Invalid master password')).toBeVisible();
     
     // Should stay on unlock page
     await expect(page).toHaveURL('/unlock');
@@ -152,13 +169,13 @@ test.describe('Smoke Tests - Vault and Auth Flow', () => {
     await page.click('button:has-text("Bootstrap Vault")');
     
     await page.goto('/login');
-    await page.fill('input[type="text"]', TEST_OPERATOR.login);
-    await page.fill('input[type="password"]', TEST_OPERATOR.password);
-    await page.click('button:has-text("Sign in")');
-    
+    await page.fill('input#login', TEST_OPERATOR.login);
+    await page.fill('input#password', TEST_OPERATOR.password);
+    await page.click('button:has-text("Login")');
+
     await page.goto('/unlock');
-    await page.fill('input[type="password"]', MASTER_PASSWORD);
-    await page.click('button:has-text("Unlock Vault")');
+    await page.fill('input#masterPassword', MASTER_PASSWORD);
+    await page.click('button:has-text("Unlock")');
     
     // Navigate to audit log
     await page.goto('/dashboard/audit');
@@ -176,11 +193,12 @@ test.describe('Smoke Tests - Vault and Auth Flow', () => {
 // Setup and teardown
 test.beforeAll(async () => {
   // Setup: Create test operator if needed
-  // This would typically use an API or direct DB call
   console.log('Setting up E2E test environment...');
+  await createTestOperator();
 });
 
 test.afterAll(async () => {
   // Cleanup: Remove test data
   console.log('Cleaning up E2E test environment...');
+  await resetVaultState();
 });

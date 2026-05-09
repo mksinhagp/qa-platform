@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import AppShell from '@/components/components/app-shell';
+import AppShell from '@/components/app-shell';
 import { listCredentials, type Credential } from '@/app/actions/credentials';
 import { listSites, type Site } from '@/app/actions/sites';
 import { Button } from '@/components/ui/button';

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import AppShell from '@/components/components/app-shell';
+import AppShell from '@/components/app-shell';
 import { listEmailInboxes, type EmailInbox } from '@/app/actions/email-inboxes';
 import { Button } from '@/components/ui/button';
 import { Plus, Edit, Mail, Server, CheckCircle, XCircle, Shield } from 'lucide-react';

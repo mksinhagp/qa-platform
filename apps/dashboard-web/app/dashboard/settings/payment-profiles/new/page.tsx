@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import AppShell from '@/components/components/app-shell';
+import AppShell from '@/components/app-shell';
 import { createPaymentProfile } from '@/app/actions/payment-profiles';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

@@ -7,26 +7,29 @@ services:
 
   migrator:
     volumes:
-      - ./db:/app/db
-      - ./packages/db:/app/packages/db
+      - .:/workspace
+      - /workspace/node_modules
 
   dashboard-web:
     build:
-      context: ./apps/dashboard-web
-      dockerfile: ../../docker/dashboard/Dockerfile
+      context: .
+      dockerfile: ./docker/dashboard/Dockerfile
       target: builder
-    command: pnpm dev
+    command: pnpm --filter dashboard-web dev
     volumes:
-      - ./apps/dashboard-web:/app
-      - /app/node_modules
-      - /app/.next
+      - .:/workspace
+      - /workspace/node_modules
+      - /workspace/apps/dashboard-web/.next
     environment:
       NODE_ENV: development
 
   runner:
-    command: pnpm dev
+    build:
+      context: .
+      dockerfile: ./docker/runner/Dockerfile
+    command: pnpm --filter runner dev
     volumes:
-      - ./apps/runner:/app
-      - /app/node_modules
+      - .:/workspace
+      - /workspace/node_modules
     environment:
       NODE_ENV: development

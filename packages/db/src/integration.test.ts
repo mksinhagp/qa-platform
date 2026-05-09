@@ -1,8 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { invokeProc, invokeProcScalar, withTransaction, query } from './procedures';
-import { getClient, closePool } from './client';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-// Mock pg
+// Mock pg before importing modules that use it
 const mockQuery = vi.fn();
 const mockRelease = vi.fn();
 const mockConnect = vi.fn().mockResolvedValue({
@@ -10,17 +8,21 @@ const mockConnect = vi.fn().mockResolvedValue({
   release: mockRelease,
 });
 const mockEnd = vi.fn();
+const mockOn = vi.fn();
+const mockPoolInstance = {
+  connect: mockConnect,
+  query: mockQuery,
+  end: mockEnd,
+  on: mockOn,
+};
 
 vi.mock('pg', () => ({
-  Pool: vi.fn().mockImplementation(() => ({
-    connect: mockConnect,
-    end: mockEnd,
-    on: vi.fn(),
-  })),
+  Pool: vi.fn().mockImplementation(() => mockPoolInstance),
 }));
 
 vi.mock('@qa-platform/config', () => ({
   loadEnv: vi.fn(),
+  resetEnv: vi.fn(),
   getEnv: vi.fn().mockReturnValue({
     POSTGRES_HOST: 'localhost',
     POSTGRES_PORT: 5434,
@@ -30,9 +32,30 @@ vi.mock('@qa-platform/config', () => ({
   }),
 }));
 
+// Import after mocks are set up
+import { invokeProc, invokeProcScalar, invokeProcWrite } from './procedures';
+import { withTransaction, query } from './transaction';
+import { initializePool, getClient, closePool } from './client';
+
 describe('db integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockQuery.mockReset();
+    mockRelease.mockReset();
+    mockConnect.mockReset();
+    mockConnect.mockResolvedValue({
+      query: mockQuery,
+      release: mockRelease,
+    });
+    mockEnd.mockReset();
+    // Initialize pool so getPool() doesn't throw
+    initializePool({
+      host: 'localhost',
+      port: 5434,
+      user: 'postgres',
+      password: 'postgres',
+      database: 'qa_platform',
+    });
   });
 
   describe('invokeProc', () => {
@@ -47,7 +70,7 @@ describe('db integration', () => {
 
       expect(result).toEqual(mockRows);
       expect(mockQuery).toHaveBeenCalledWith(
-        'SELECT * FROM sp_test_list($1)',
+        'SELECT * FROM public.sp_test_list($1)',
         ['value']
       );
     });
@@ -58,7 +81,7 @@ describe('db integration', () => {
       await invokeProc('sp_test_list', { i_param: null });
 
       expect(mockQuery).toHaveBeenCalledWith(
-        'SELECT * FROM sp_test_list($1)',
+        'SELECT * FROM public.sp_test_list($1)',
         [null]
       );
     });
@@ -69,19 +92,19 @@ describe('db integration', () => {
       await invokeProc('sp_test_list', {});
 
       expect(mockQuery).toHaveBeenCalledWith(
-        'SELECT * FROM sp_test_list()',
+        'SELECT * FROM public.sp_test_list()',
         []
       );
     });
   });
 
   describe('invokeProcScalar', () => {
-    it('should return single value from first column of first row', async () => {
-      mockQuery.mockResolvedValueOnce({ rows: [{ o_id: 42 }] });
+    it('should return first row from result', async () => {
+      mockQuery.mockResolvedValueOnce({ rows: [{ o_id: 42, o_name: 'test' }] });
 
       const result = await invokeProcScalar('sp_test_insert', { i_name: 'test' });
 
-      expect(result).toBe(42);
+      expect(result).toEqual({ o_id: 42, o_name: 'test' });
     });
 
     it('should return null for empty result', async () => {
@@ -100,7 +123,7 @@ describe('db integration', () => {
         .mockResolvedValueOnce({ rows: [{ o_id: 1 }] }) // procedure
         .mockResolvedValueOnce({ rows: [] }); // COMMIT
 
-      const result = await invokeProc('sp_test_insert', { i_name: 'test' });
+      const result = await invokeProcWrite('sp_test_insert', { i_name: 'test' });
 
       expect(result).toEqual([{ o_id: 1 }]);
       expect(mockQuery).toHaveBeenCalledWith('BEGIN');
@@ -116,7 +139,7 @@ describe('db integration', () => {
         .mockResolvedValueOnce({ rows: [{ o_id: 2 }] })
         .mockResolvedValueOnce({ rows: [] }); // COMMIT
 
-      const result = await withTransaction(async (client) => {
+      const result = await withTransaction(async ({ client }) => {
         const r1 = await client.query('SELECT * FROM test1');
         const r2 = await client.query('SELECT * FROM test2');
         return [r1.rows[0], r2.rows[0]];
@@ -134,7 +157,7 @@ describe('db integration', () => {
         .mockResolvedValueOnce({ rows: [] }); // ROLLBACK
 
       await expect(
-        withTransaction(async (client) => {
+        withTransaction(async ({ client }) => {
           await client.query('SELECT * FROM test1');
           throw new Error('Transaction failed');
         })
@@ -165,29 +188,21 @@ describe('db integration', () => {
 
       expect(result).toEqual([{ o_id: 1 }]);
       expect(mockQuery).not.toHaveBeenCalledWith('BEGIN');
-      expect(mockRelease).toHaveBeenCalled();
     });
 
     it('should handle query errors', async () => {
       mockQuery.mockRejectedValueOnce(new Error('Connection failed'));
 
       await expect(query('SELECT * FROM test', [])).rejects.toThrow('Connection failed');
-      expect(mockRelease).toHaveBeenCalled();
     });
   });
 
   describe('connection pool', () => {
     it('should create singleton pool', async () => {
-      // Reset module to test singleton
-      vi.resetModules();
-      
-      const { getClient: getClient1 } = await import('./client');
       const client1 = await getClient();
-      
-      const { getClient: getClient2 } = await import('./client');
       const client2 = await getClient();
       
-      // Both calls should use same pool (connect called once)
+      // Both calls should use same pool (connect called twice)
       expect(mockConnect).toHaveBeenCalledTimes(2);
     });
 

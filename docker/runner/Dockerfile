@@ -1,17 +1,17 @@
 FROM mcr.microsoft.com/playwright:v1.48.0-jammy AS base
 
-WORKDIR /app
+WORKDIR /workspace
 
-# Install dependencies
-COPY package.json ./
+# Copy workspace root files for pnpm
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN npm install -g pnpm@9
-RUN pnpm install
+RUN pnpm install --frozen-lockfile
 
 # Copy source code
 COPY . .
 
 # Build TypeScript
-RUN pnpm build
+RUN pnpm --filter runner build
 
 # Production stage
 FROM base AS runner

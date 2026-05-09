@@ -2165,3 +2165,106 @@ Per Master Plan §18, the following exit criteria are now met:
 - Phase 3: Test runner, persona management, and run scheduling
 
 ---
+
+## May 9, 2026 - Post-Phase 2 Session Review
+
+### Session Summary
+
+**Date**: May 9, 2026
+**Branch**: main (ahead of origin/main by 1 commit)
+**Status**: Uncommitted changes present (44 files modified, 923 insertions, 10,220 deletions)
+
+### Work Completed by Previous Sessions
+
+Based on git history and PROJECT_DEVELOPMENT_LOG.md review:
+
+**Phase 0 (Tasks 1-17)** - ✅ COMPLETE
+- Monorepo scaffolding with pnpm, Turborepo, ESLint, Prettier, TypeScript
+- Packages: config, shared-types, db with pg client, transaction helper, proc-invocation wrapper, migration runner
+- Database: 5 migrations (auth/RBAC, system/vault/audit, sites, personas/devices/networks, runs), 16 stored procedures
+- Seed data: personas (6), device profiles (8), network profiles (5)
+- Next.js dashboard-web with placeholder routes matching master plan §11.1
+- Node runner service with /health and stub /run endpoints
+- Dockerfiles for dashboard and runner (Playwright base)
+- Docker Compose with postgres, migrator, dashboard-web, runner, ollama (profile), mailcatcher (profile)
+- Structured logging with correlation ID propagation
+- README.md with startup commands and troubleshooting
+- 5 ADRs: monorepo tooling, DB access pattern, vault crypto, run model, reporting model
+
+**Phase 1 (Tasks 1-15)** - ✅ COMPLETE
+- 4 migrations: operator_sessions, vault_unlock_sessions, secret_records, secret_access_logs, site_credentials, payment_profiles, email_inboxes, approval_policies
+- 28 stored procedures for auth, RBAC, vault, secrets, credentials, payment profiles, email inboxes, approval policies
+- packages/auth: Argon2id password hashing, session management, capability resolver, server-action guards
+- packages/vault: Argon2id KDF, AES-256-GCM helpers, unlock-session registry, bootstrap/unlock/lock APIs
+- Login page (/login) and logout server action
+- Vault bootstrap page (/dashboard/settings/vault/bootstrap)
+- Vault unlock page (/unlock) and global app-shell vault state pill
+- Operator management pages (/dashboard/settings/operators + /new + edit)
+- Credentials CRUD pages (/dashboard/settings/credentials)
+- Payment profiles CRUD pages (/dashboard/settings/payment-profiles)
+- Email inboxes CRUD pages (/dashboard/settings/email-inboxes)
+- Audit log viewer (/dashboard/audit)
+- Approval policies viewer (/dashboard/settings/approval-policies)
+- Integration tests (Vitest): 90 tests passing (24 new sites tests + 66 pre-existing)
+- E2E smoke tests (Playwright): 3/4 tests passing (1 timeout due to test setup API issue)
+
+**Phase 2 (Tasks 1-7)** - ✅ COMPLETE
+- Migration: site_env_payment_bindings, site_env_email_bindings
+- 9 stored procedures: sites list with counts, credential delete, payment/email bindings CRUD, credentials list enriched
+- Server actions: full sites module (CRUD for sites, environments, credentials, payment bindings, email bindings)
+- Site onboarding wizard (/dashboard/sites/new) - 3-step wizard (site info, environments optional, review)
+- Sites list page (/dashboard/sites) - data-driven with environment counts
+- Site detail page (/dashboard/sites/[siteId]) - tabbed interface (Overview, Environments, Credentials, Payment Profiles, Email Inboxes)
+- Integration tests: 24 new sites tests, all passing
+
+### Current State Analysis
+
+**Uncommitted Changes** (44 files modified):
+- Major refactoring of server actions (credentials, operators, sites, vault) - likely capability guard fixes
+- Dashboard UI pages updated (audit, credentials, email-inboxes, operators, payment-profiles, vault bootstrap)
+- Component structure changes: moved app-shell.tsx from components/components/ to components/
+- Docker configuration updates (docker-compose.yml, docker-compose.override.yml, Dockerfiles)
+- Package updates: db, auth, vault, shared-types
+- Test updates: capabilities.test.ts, sessions.test.ts, vault.test.ts, integration.test.ts
+- Next.js config changes
+- Package-lock.json removed (using pnpm-lock.yaml)
+
+**Untracked Files**:
+- .mcp-config.json - MCP server configuration
+- .windsurf/ - Windsurf IDE configuration
+- apps/dashboard-web/app/api/ - API routes (likely test setup API)
+- apps/dashboard-web/app/dashboard/settings/approval-policies/ - approval policies UI
+- apps/dashboard-web/components/app-shell.tsx - moved component
+- apps/dashboard-web/playwright-report/ - Playwright test reports
+- apps/dashboard-web/test-results/ - Test results
+- packages/db/src/migrations-index.ts - migration index file
+- packages/mcp-postgres/ - New MCP PostgreSQL package
+
+### Issues Identified
+
+1. **Git Status**: Branch is ahead of origin/main by 1 commit, with extensive uncommitted changes
+2. **Test Failures**: 3 pre-existing audit.test.ts failures (mock-setup issues, not new regressions)
+3. **E2E Test**: 1 timeout in smoke tests (test setup API not responding)
+4. **Component Path**: app-shell.tsx moved but old path still exists (deleted in git status)
+
+### Recommendations
+
+**Immediate Actions**:
+1. Commit current changes with descriptive message documenting the refactoring work
+2. Push to origin/main to sync remote repository
+3. Investigate and fix the 3 audit.test.ts mock-setup failures
+4. Resolve E2E test setup API timeout issue
+
+**Next Phase Work** (Phase 3 per Master Plan):
+- Task 1: Persona-aware step library in packages/playwright-core
+- Task 2: Runner service real auth-state generation
+- Task 3: Public flow templates (registration → profile/account)
+- Task 4: Confusion/friction telemetry
+- Task 5: Approval-gated checkout + sandbox payments
+- Task 6: API validation engine
+- Task 7: Admin/back-office coverage
+
+**Deferred Tasks**:
+- Task 16 (Phase 1): Documentation runbook for vault (bootstrap, master-password rotation, KDF upgrade, emergency lock-out recovery)
+
+---

@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createSession, validateSession, revokeSession } from './sessions';
-import { invokeProc } from '@qa-platform/db';
+import { invokeProc, invokeProcScalar } from '@qa-platform/db';
 
 // Mock the db module
 vi.mock('@qa-platform/db', () => ({
   invokeProc: vi.fn(),
+  invokeProcScalar: vi.fn(),
 }));
 
 describe('sessions', () => {
@@ -14,23 +15,20 @@ describe('sessions', () => {
 
   describe('createSession', () => {
     it('should create a session with token', async () => {
-      const mockResult = [
-        {
-          o_id: 1,
-          o_session_token: 'test-token-123',
-          o_expires_date: new Date(Date.now() + 86400000).toISOString(),
-        },
-      ];
-      vi.mocked(invokeProc).mockResolvedValueOnce(mockResult);
+      const mockResult = {
+        o_id: 1,
+        o_session_token: 'test-token-123',
+        o_created_date: new Date().toISOString(),
+        o_expires_date: new Date(Date.now() + 86400000).toISOString(),
+      };
+      vi.mocked(invokeProcScalar).mockResolvedValueOnce(mockResult);
 
       const result = await createSession(1, '127.0.0.1', 'Test-Agent', 'testuser');
 
-      expect(result).toEqual({
-        sessionId: 1,
-        sessionToken: 'test-token-123',
-        expiresAt: expect.any(String),
-      });
-      expect(invokeProc).toHaveBeenCalledWith('sp_operator_sessions_create', {
+      expect(result.id).toBe(1);
+      expect(result.sessionToken).toBeDefined();
+      expect(result.operatorId).toBe(1);
+      expect(invokeProcScalar).toHaveBeenCalledWith('sp_operator_sessions_create', {
         i_operator_id: 1,
         i_session_token: expect.any(String),
         i_ip_address: '127.0.0.1',
@@ -42,16 +40,17 @@ describe('sessions', () => {
     });
 
     it('should generate unique session tokens', async () => {
-      const mockResult1 = [{ o_id: 1, o_session_token: 'token-1', o_expires_date: new Date().toISOString() }];
-      const mockResult2 = [{ o_id: 2, o_session_token: 'token-2', o_expires_date: new Date().toISOString() }];
+      const mockResult1 = { o_id: 1, o_session_token: 'token-1', o_created_date: new Date().toISOString(), o_expires_date: new Date().toISOString() };
+      const mockResult2 = { o_id: 2, o_session_token: 'token-2', o_created_date: new Date().toISOString(), o_expires_date: new Date().toISOString() };
       
-      vi.mocked(invokeProc)
+      vi.mocked(invokeProcScalar)
         .mockResolvedValueOnce(mockResult1)
         .mockResolvedValueOnce(mockResult2);
 
       const result1 = await createSession(1, '127.0.0.1', 'Agent', 'user');
       const result2 = await createSession(1, '127.0.0.1', 'Agent', 'user');
 
+      // Each call generates its own token via randomBytes, so they differ
       expect(result1.sessionToken).not.toBe(result2.sessionToken);
     });
   });
@@ -60,7 +59,7 @@ describe('sessions', () => {
     it('should validate an active session', async () => {
       const mockResult = [
         {
-          o_id: 1,
+          o_session_id: 1,
           o_operator_id: 1,
           o_is_valid: true,
         },
@@ -77,7 +76,7 @@ describe('sessions', () => {
     it('should reject invalid session', async () => {
       const mockResult = [
         {
-          o_id: null,
+          o_session_id: null,
           o_operator_id: null,
           o_is_valid: false,
         },
@@ -93,7 +92,7 @@ describe('sessions', () => {
     it('should handle expired session', async () => {
       const mockResult = [
         {
-          o_id: null,
+          o_session_id: null,
           o_operator_id: null,
           o_is_valid: false,
         },
@@ -108,19 +107,19 @@ describe('sessions', () => {
 
   describe('revokeSession', () => {
     it('should revoke a session', async () => {
-      vi.mocked(invokeProc).mockResolvedValueOnce([{ o_success: true }]);
+      vi.mocked(invokeProcScalar).mockResolvedValueOnce({ o_success: true });
 
       const result = await revokeSession('valid-token', 'operator');
 
       expect(result).toBe(true);
-      expect(invokeProc).toHaveBeenCalledWith('sp_operator_sessions_revoke', {
+      expect(invokeProcScalar).toHaveBeenCalledWith('sp_operator_sessions_revoke', {
         i_session_token: 'valid-token',
         i_updated_by: 'operator',
       });
     });
 
     it('should handle revoke failure gracefully', async () => {
-      vi.mocked(invokeProc).mockRejectedValueOnce(new Error('DB error'));
+      vi.mocked(invokeProcScalar).mockRejectedValueOnce(new Error('DB error'));
 
       await expect(revokeSession('token', 'operator')).rejects.toThrow('DB error');
     });
@@ -128,19 +127,18 @@ describe('sessions', () => {
 
   describe('session timeout behavior', () => {
     it('should use configured timeout values', async () => {
-      const mockResult = [
-        {
-          o_id: 1,
-          o_session_token: 'token',
-          o_expires_date: new Date(Date.now() + 2592000000).toISOString(), // 30 days
-        },
-      ];
-      vi.mocked(invokeProc).mockResolvedValueOnce(mockResult);
+      const mockResult = {
+        o_id: 1,
+        o_session_token: 'token',
+        o_created_date: new Date().toISOString(),
+        o_expires_date: new Date(Date.now() + 2592000000).toISOString(), // 30 days
+      };
+      vi.mocked(invokeProcScalar).mockResolvedValueOnce(mockResult);
 
       await createSession(1, '127.0.0.1', 'Agent', 'user');
 
       // Verify the call used correct timeout values from env
-      expect(invokeProc).toHaveBeenCalledWith(
+      expect(invokeProcScalar).toHaveBeenCalledWith(
         'sp_operator_sessions_create',
         expect.objectContaining({
           i_idle_timeout_hours: 8, // From vitest.setup.ts

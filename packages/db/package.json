@@ -5,6 +5,16 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./migrations": {
+      "import": "./dist/migrations-index.js",
+      "types": "./dist/migrations-index.d.ts"
+    }
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -14,7 +24,8 @@
   },
   "dependencies": {
     "pg": "^8.11.3",
-    "@types/pg": "^8.10.9"
+    "@types/pg": "^8.10.9",
+    "@qa-platform/shared-types": "workspace:*"
   },
   "devDependencies": {
     "tsx": "^4.21.0",

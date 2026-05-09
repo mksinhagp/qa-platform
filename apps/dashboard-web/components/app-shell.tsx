@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { VaultStatePill } from "../vault-state-pill";
+import { VaultStatePill } from "./vault-state-pill";
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
   return (

@@ -51,7 +51,15 @@ export async function listOperators(activeOnly?: boolean): Promise<OperatorsList
       i_active: activeOnly ?? null,
     });
 
-    const operators: Operator[] = result.map((row) => ({
+    const operators: Operator[] = result.map((row: {
+      o_id: number;
+      o_login: string;
+      o_full_name: string | null;
+      o_email: string | null;
+      o_active: boolean;
+      o_created_date: string;
+      o_updated_date: string;
+    }) => ({
       id: row.o_id,
       login: row.o_login,
       full_name: row.o_full_name,

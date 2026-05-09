@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "qa_platform_pg": {
+      "command": "node",
+      "args": [
+        "/Users/mksmoshome/Library/CloudStorage/OneDrive-Personal/Projects/WebsiteTester/packages/mcp-postgres/dist/index.js"
+      ],
+      "env": {
+        "DATABASE_URL": "postgresql://qa_user:qa_password@localhost:5434/qa_platform"
+      }
+    }
+  }
+}

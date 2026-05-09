@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
-import AppShell from '@/components/components/app-shell';
+import AppShell from '@/components/app-shell';
 import { getEmailInbox, updateEmailInbox, type EmailInbox } from '@/app/actions/email-inboxes';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

@@ -20,7 +20,11 @@ export async function getCapabilitiesForOperator(
     i_operator_id: operatorId,
   });
 
-  return result.map((row: any) => ({
+  return result.map((row: {
+    o_capability_id: number;
+    o_capability_name: string;
+    o_capability_category: string;
+  }) => ({
     capabilityId: row.o_capability_id,
     capabilityName: row.o_capability_name,
     capabilityCategory: row.o_capability_category,

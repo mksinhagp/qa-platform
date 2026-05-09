@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import AppShell from '@/components/components/app-shell';
+import AppShell from '@/components/app-shell';
 import { listPaymentProfiles, type PaymentProfile } from '@/app/actions/payment-profiles';
 import { Button } from '@/components/ui/button';
 import { Plus, Edit, CreditCard, Landmark, CheckCircle, XCircle } from 'lucide-react';

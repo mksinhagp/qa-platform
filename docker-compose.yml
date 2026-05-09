@@ -8,8 +8,6 @@ services:
       POSTGRES_DB: qa_platform
       POSTGRES_USER: qa_user
       POSTGRES_PASSWORD: qa_password
-    ports:
-      - "5432:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
@@ -39,8 +37,8 @@ services:
 
   dashboard-web:
     build:
-      context: ./apps/dashboard-web
-      dockerfile: ../../docker/dashboard/Dockerfile
+      context: .
+      dockerfile: ./docker/dashboard/Dockerfile
     container_name: qa-platform-dashboard
     environment:
       NODE_ENV: production
@@ -62,8 +60,8 @@ services:
 
   runner:
     build:
-      context: ./apps/runner
-      dockerfile: ../../docker/runner/Dockerfile
+      context: .
+      dockerfile: ./docker/runner/Dockerfile
     container_name: qa-platform-runner
     environment:
       NODE_ENV: production

@@ -24,14 +24,14 @@ export interface ProcResult<T = unknown> {
 }
 
 /**
- * Invoke a stored procedure that returns a result set
+ * Invoke a stored procedure that returns a result set (rows array)
  * Uses parameterized queries to prevent SQL injection
  */
-export async function invokeProc(
+export async function invokeProc<T = Record<string, unknown>>(
   procName: string,
   params: ProcParams = {},
   options: { useTransaction?: boolean } = {}
-): Promise<ProcResult> {
+): Promise<T[]> {
   const { useTransaction = false } = options;
 
   // Build parameter placeholders ($1, $2, ...)
@@ -45,10 +45,7 @@ export async function invokeProc(
   if (useTransaction) {
     return withTransaction(async ({ client }) => {
       const result = await client.query(sql, paramValues);
-      return {
-        rows: result.rows,
-        rowCount: result.rowCount || 0,
-      };
+      return result.rows as T[];
     });
   }
 
@@ -57,10 +54,7 @@ export async function invokeProc(
   const pool = getPool();
   const result = await pool.query(sql, paramValues);
 
-  return {
-    rows: result.rows,
-    rowCount: result.rowCount || 0,
-  };
+  return result.rows as T[];
 }
 
 /**
@@ -86,29 +80,27 @@ export async function invokeProcInTransaction(
 }
 
 /**
- * Invoke a stored procedure that returns a single scalar value
- * Returns the first column of the first row, or null if no results
+ * Invoke a stored procedure that returns a single row
+ * Returns the first row as an object, or null if no results
  */
-export async function invokeProcScalar<T = unknown>(
+export async function invokeProcScalar<T = Record<string, unknown>>(
   procName: string,
   params: ProcParams = {}
 ): Promise<T | null> {
-  const result = await invokeProc(procName, params);
-  if (result.rows.length === 0) {
+  const rows = await invokeProc<T>(procName, params);
+  if (rows.length === 0) {
     return null;
   }
-  const firstRow = result.rows[0] as Record<string, unknown>;
-  const firstKey = Object.keys(firstRow)[0];
-  return (firstRow[firstKey] as T) || null;
+  return rows[0];
 }
 
 /**
  * Invoke a stored procedure that performs write operations
  * Automatically uses transaction for data integrity
  */
-export async function invokeProcWrite(
+export async function invokeProcWrite<T = Record<string, unknown>>(
   procName: string,
   params: ProcParams = {}
-): Promise<ProcResult> {
-  return invokeProc(procName, params, { useTransaction: true });
+): Promise<T[]> {
+  return invokeProc<T>(procName, params, { useTransaction: true });
 }

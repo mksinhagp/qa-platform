@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import Link from 'next/link';
-import AppShell from '@/components/components/app-shell';
+import AppShell from '@/components/app-shell';
 import { getOperator, updateOperator } from '@/app/actions/operators';
 import type { Operator } from '@/app/actions/operators';
 import { Button } from '@/components/ui/button';

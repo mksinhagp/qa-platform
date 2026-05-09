@@ -2,10 +2,11 @@
  * Site record
  */
 export interface Site {
-  id: string;
+  id: number;
   name: string;
   base_url: string;
   description?: string;
+  is_active: boolean;
   created_date: Date;
   updated_date: Date;
   created_by: string;
@@ -16,11 +17,12 @@ export interface Site {
  * Site environment
  */
 export interface SiteEnvironment {
-  id: string;
-  site_id: string;
+  id: number;
+  site_id: number;
   name: string;
-  environment_type: "dev" | "staging" | "production";
   base_url: string;
+  description?: string;
+  is_active: boolean;
   created_date: Date;
   updated_date: Date;
   created_by: string;

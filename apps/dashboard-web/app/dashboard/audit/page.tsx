@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import AppShell from '@/components/components/app-shell';
+import AppShell from '@/components/app-shell';
 import { queryAuditLogs, type AuditLogEntry } from '@/app/actions/audit';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

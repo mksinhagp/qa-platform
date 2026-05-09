@@ -2,7 +2,6 @@
 
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { getVaultState, bootstrapVault, unlockVault, lockVault } from '@qa-platform/vault';
 import { getSession } from './auth';
 
 export interface VaultBootstrapResult {
@@ -38,6 +37,9 @@ export async function bootstrapVaultAction(
       return { success: false, error: 'Not authenticated' };
     }
 
+    // Dynamic import to prevent client-side bundling of server-only packages
+    const { bootstrapVault, getVaultState } = await import('@qa-platform/vault');
+
     // Check if vault is already bootstrapped
     const state = await getVaultState();
     if (state.isBootstrapped) {
@@ -56,9 +58,10 @@ export async function bootstrapVaultAction(
     }
 
     // Set unlock token cookie
-    if (result.unlockToken) {
+    const unlockToken = 'unlockToken' in result ? result.unlockToken : undefined;
+    if (unlockToken) {
       const cookieStore = await cookies();
-      cookieStore.set('unlock_token', result.unlockToken, {
+      cookieStore.set('unlock_token', unlockToken, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
@@ -67,7 +70,7 @@ export async function bootstrapVaultAction(
       });
     }
 
-    return { success: true, unlockToken: result.unlockToken };
+    return { success: true, unlockToken };
   } catch (error) {
     console.error('Vault bootstrap error:', error);
     return { success: false, error: 'An error occurred during vault bootstrap' };
@@ -83,6 +86,9 @@ export async function unlockVaultAction(
     if (!session) {
       return { success: false, error: 'Not authenticated' };
     }
+
+    // Dynamic import to prevent client-side bundling of server-only packages
+    const { getVaultState, unlockVault } = await import('@qa-platform/vault');
 
     // Check if vault is bootstrapped
     const state = await getVaultState();
@@ -135,6 +141,9 @@ export async function lockVaultAction(): Promise<{ success: boolean; error?: str
       return { success: false, error: 'Vault is not unlocked' };
     }
 
+    // Dynamic import to prevent client-side bundling of server-only packages
+    const { lockVault } = await import('@qa-platform/vault');
+
     // Lock vault
     await lockVault(unlockToken, session.operatorId);
 
@@ -150,6 +159,8 @@ export async function lockVaultAction(): Promise<{ success: boolean; error?: str
 
 export async function getVaultStateAction() {
   try {
+    // Dynamic import to prevent client-side bundling of server-only packages
+    const { getVaultState } = await import('@qa-platform/vault');
     const state = await getVaultState();
     return state;
   } catch (error) {

@@ -2,6 +2,32 @@
 
 import { invokeProc, invokeProcWrite } from '@qa-platform/db';
 import { requireOperator } from '@qa-platform/auth';
+import { z } from 'zod';
+
+// ─── Validation Schemas ──────────────────────────────────────────────────────
+
+const siteSchema = z.object({
+  name: z.string().min(1, 'Site name is required').max(255, 'Name too long'),
+  base_url: z.string().url('Must be a valid URL').max(2048, 'URL too long'),
+  description: z.string().max(1000, 'Description too long').optional(),
+});
+
+const siteUpdateSchema = siteSchema.extend({
+  id: z.number().int().positive('Invalid site ID'),
+  is_active: z.boolean(),
+});
+
+const siteEnvironmentSchema = z.object({
+  site_id: z.number().int().positive('Invalid site ID'),
+  name: z.string().min(1, 'Environment name is required').max(100, 'Name too long'),
+  base_url: z.string().url('Must be a valid URL').max(2048, 'URL too long'),
+  description: z.string().max(1000, 'Description too long').optional(),
+});
+
+const siteEnvironmentUpdateSchema = siteEnvironmentSchema.extend({
+  id: z.number().int().positive('Invalid environment ID'),
+  is_active: z.boolean(),
+}).omit({ site_id: true });
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -85,11 +111,18 @@ export async function createSite(data: {
   description?: string;
 }): Promise<{ success: boolean; site?: Site; error?: string }> {
   try {
+    // Validate input
+    const validation = siteSchema.safeParse(data);
+    if (!validation.success) {
+      const errors = validation.error.issues.map((issue: { message: string }) => issue.message).join(', ');
+      return { success: false, error: errors };
+    }
+
     const authContext = await requireOperator();
     const result = await invokeProcWrite('sp_sites_insert', {
-      i_name: data.name,
-      i_base_url: data.base_url,
-      i_description: data.description ?? null,
+      i_name: validation.data.name,
+      i_base_url: validation.data.base_url,
+      i_description: validation.data.description ?? null,
       i_is_active: true,
       i_created_by: authContext.operatorId.toString(),
     });
@@ -116,13 +149,20 @@ export async function updateSite(data: {
   is_active: boolean;
 }): Promise<{ success: boolean; site?: Site; error?: string }> {
   try {
+    // Validate input
+    const validation = siteUpdateSchema.safeParse(data);
+    if (!validation.success) {
+      const errors = validation.error.issues.map((issue: { message: string }) => issue.message).join(', ');
+      return { success: false, error: errors };
+    }
+
     const authContext = await requireOperator();
     const result = await invokeProcWrite('sp_sites_update', {
-      i_id: data.id,
-      i_name: data.name,
-      i_base_url: data.base_url,
-      i_description: data.description ?? null,
-      i_is_active: data.is_active,
+      i_id: validation.data.id,
+      i_name: validation.data.name,
+      i_base_url: validation.data.base_url,
+      i_description: validation.data.description ?? null,
+      i_is_active: validation.data.is_active,
       i_updated_by: authContext.operatorId.toString(),
     });
     if (!result.length) return { success: false, error: 'Site not found' };
@@ -194,12 +234,19 @@ export async function createSiteEnvironment(data: {
   description?: string;
 }): Promise<{ success: boolean; environment?: SiteEnvironment; error?: string }> {
   try {
+    // Validate input
+    const validation = siteEnvironmentSchema.safeParse(data);
+    if (!validation.success) {
+      const errors = validation.error.issues.map((issue: { message: string }) => issue.message).join(', ');
+      return { success: false, error: errors };
+    }
+
     const authContext = await requireOperator();
     const result = await invokeProcWrite('sp_site_environments_insert', {
-      i_site_id: data.site_id,
-      i_name: data.name,
-      i_base_url: data.base_url,
-      i_description: data.description ?? null,
+      i_site_id: validation.data.site_id,
+      i_name: validation.data.name,
+      i_base_url: validation.data.base_url,
+      i_description: validation.data.description ?? null,
       i_is_active: true,
       i_created_by: authContext.operatorId.toString(),
     });
@@ -231,13 +278,20 @@ export async function updateSiteEnvironment(data: {
   is_active: boolean;
 }): Promise<{ success: boolean; environment?: SiteEnvironment; error?: string }> {
   try {
+    // Validate input
+    const validation = siteEnvironmentUpdateSchema.safeParse(data);
+    if (!validation.success) {
+      const errors = validation.error.issues.map((issue: { message: string }) => issue.message).join(', ');
+      return { success: false, error: errors };
+    }
+
     const authContext = await requireOperator();
     const result = await invokeProcWrite('sp_site_environments_update', {
-      i_id: data.id,
-      i_name: data.name,
-      i_base_url: data.base_url,
-      i_description: data.description ?? null,
-      i_is_active: data.is_active,
+      i_id: validation.data.id,
+      i_name: validation.data.name,
+      i_base_url: validation.data.base_url,
+      i_description: validation.data.description ?? null,
+      i_is_active: validation.data.is_active,
       i_updated_by: authContext.operatorId.toString(),
     });
     if (!result.length) return { success: false, error: 'Environment not found' };

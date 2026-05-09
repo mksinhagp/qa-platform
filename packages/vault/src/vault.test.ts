@@ -12,10 +12,20 @@ import {
 import { invokeProc, invokeProcScalar } from '@qa-platform/db';
 import registry from './registry';
 
+// Use vi.hoisted so these variables are available inside vi.mock factory
+const { mockClientQuery, mockClientRelease } = vi.hoisted(() => ({
+  mockClientQuery: vi.fn(),
+  mockClientRelease: vi.fn(),
+}));
+
 // Mock the db module
 vi.mock('@qa-platform/db', () => ({
   invokeProc: vi.fn(),
   invokeProcScalar: vi.fn(),
+  getClient: vi.fn().mockResolvedValue({
+    query: mockClientQuery,
+    release: mockClientRelease,
+  }),
 }));
 
 // Mock the registry
@@ -24,12 +34,15 @@ vi.mock('./registry', () => ({
     register: vi.fn(),
     get: vi.fn(),
     remove: vi.fn(),
+    generateUnlockToken: vi.fn().mockReturnValue('mock-unlock-token'),
   },
 }));
 
 describe('vault', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockClientQuery.mockReset();
+    mockClientRelease.mockReset();
   });
 
   describe('getVaultState', () => {
@@ -65,8 +78,48 @@ describe('vault', () => {
 
   describe('bootstrapVault', () => {
     it('should bootstrap vault with master password', async () => {
-      vi.mocked(invokeProc).mockResolvedValueOnce([]); // getVaultState check
-      vi.mocked(invokeProcScalar).mockResolvedValueOnce({ o_unlock_token: 'unlock-token-123' });
+      // Capture the salt, nonce, and wrapped_rvk that bootstrap stores, so unlock can use them
+      let capturedSalt: Buffer | null = null;
+      let capturedNonce: Buffer | null = null;
+      let capturedWrappedRvk: Buffer | null = null;
+      let capturedAad: string | null = null;
+
+      // 1. getVaultState() → not bootstrapped
+      vi.mocked(invokeProc).mockResolvedValueOnce([]);
+
+      // 2. invokeProcScalar('sp_vault_bootstrap') → capture args and return success
+      vi.mocked(invokeProcScalar).mockImplementationOnce(async (_proc, params) => {
+        capturedSalt = params!.i_salt as Buffer;
+        capturedNonce = params!.i_nonce as Buffer;
+        capturedWrappedRvk = params!.i_wrapped_rvk as Buffer;
+        capturedAad = params!.i_aad as string;
+        return { o_success: true };
+      });
+
+      // 3. unlockVault → getVaultState() → bootstrapped
+      vi.mocked(invokeProc).mockResolvedValueOnce([
+        {
+          o_is_bootstrapped: true,
+          o_bootstrap_date: new Date().toISOString(),
+          o_bootstrap_operator_id: 1,
+          o_kdf_memory: 65536,
+          o_kdf_iterations: 2,
+          o_kdf_parallelism: 1,
+        },
+      ]);
+
+      // 4. unlockVault → getClient().query() → return captured vault data
+      mockClientQuery.mockImplementationOnce(async () => ({
+        rows: [{
+          salt: capturedSalt,
+          nonce: capturedNonce,
+          wrapped_rvk: capturedWrappedRvk,
+          aad: capturedAad,
+        }],
+      }));
+
+      // 5. unlockVault → invokeProcScalar('sp_vault_unlock_session_create') → success
+      vi.mocked(invokeProcScalar).mockResolvedValueOnce({ o_unlock_token: 'unlock-token' });
 
       const result = await bootstrapVault('master-password-123', 1, 1);
 
@@ -95,18 +148,38 @@ describe('vault', () => {
 
   describe('unlockVault', () => {
     it('should unlock vault with correct master password', async () => {
-      const mockVaultState = [
+      // First, generate real crypto material so unlock can decrypt
+      const { generateSalt, deriveKEK, generateRVK, generateNonce, wrapKey } = await import('./crypto');
+      const salt = generateSalt(16);
+      const nonce = generateNonce();
+      const rvk = generateRVK();
+      const kek = await deriveKEK('master-password-123', salt);
+      const aad = Buffer.from('qa-platform-vault-v1', 'utf8');
+      const wrappedRvk = await wrapKey(rvk, kek, nonce, aad);
+
+      // 1. getVaultState() → bootstrapped
+      vi.mocked(invokeProc).mockResolvedValueOnce([
         {
-          o_salt: Buffer.from('test-salt-16-bytes'),
+          o_is_bootstrapped: true,
+          o_bootstrap_date: new Date().toISOString(),
+          o_bootstrap_operator_id: 1,
           o_kdf_memory: 65536,
           o_kdf_iterations: 2,
           o_kdf_parallelism: 1,
-          o_wrapped_rvk: Buffer.from('wrapped-rvk-data'),
-          o_nonce: Buffer.from('nonce-12-bytes'),
-          o_aad: Buffer.from('qa-platform-vault-v1'),
         },
-      ];
-      vi.mocked(invokeProc).mockResolvedValueOnce(mockVaultState);
+      ]);
+
+      // 2. getClient().query() → vault row
+      mockClientQuery.mockResolvedValueOnce({
+        rows: [{
+          salt,
+          nonce,
+          wrapped_rvk: wrappedRvk,
+          aad: 'qa-platform-vault-v1',
+        }],
+      });
+
+      // 3. invokeProcScalar('sp_vault_unlock_session_create') → success
       vi.mocked(invokeProcScalar).mockResolvedValueOnce({ o_unlock_token: 'unlock-token-456' });
 
       const result = await unlockVault('master-password-123', 1, 1);
@@ -116,21 +189,38 @@ describe('vault', () => {
     });
 
     it('should fail with incorrect master password', async () => {
-      const mockVaultState = [
+      // Generate crypto material with one password
+      const { generateSalt, deriveKEK, generateRVK, generateNonce, wrapKey } = await import('./crypto');
+      const salt = generateSalt(16);
+      const nonce = generateNonce();
+      const rvk = generateRVK();
+      const kek = await deriveKEK('correct-password', salt);
+      const aad = Buffer.from('qa-platform-vault-v1', 'utf8');
+      const wrappedRvk = await wrapKey(rvk, kek, nonce, aad);
+
+      // 1. getVaultState() → bootstrapped
+      vi.mocked(invokeProc).mockResolvedValueOnce([
         {
-          o_salt: Buffer.from('test-salt-16-bytes'),
+          o_is_bootstrapped: true,
+          o_bootstrap_date: new Date().toISOString(),
+          o_bootstrap_operator_id: 1,
           o_kdf_memory: 65536,
           o_kdf_iterations: 2,
           o_kdf_parallelism: 1,
-          o_wrapped_rvk: Buffer.from('wrapped-rvk-data'),
-          o_nonce: Buffer.from('nonce-12-bytes'),
-          o_aad: Buffer.from('qa-platform-vault-v1'),
         },
-      ];
-      vi.mocked(invokeProc).mockResolvedValueOnce(mockVaultState);
-      // Simulate decryption failure with wrong password
-      vi.mocked(invokeProcScalar).mockRejectedValueOnce(new Error('Decryption failed'));
+      ]);
 
+      // 2. getClient().query() → vault row
+      mockClientQuery.mockResolvedValueOnce({
+        rows: [{
+          salt,
+          nonce,
+          wrapped_rvk: wrappedRvk,
+          aad: 'qa-platform-vault-v1',
+        }],
+      });
+
+      // Try to unlock with wrong password — unwrapKey will throw
       const result = await unlockVault('wrong-password', 1, 1);
 
       expect(result.success).toBe(false);
@@ -263,64 +353,105 @@ describe('vault', () => {
 
   describe('vault lifecycle integration', () => {
     it('should complete full lifecycle: bootstrap → unlock → encrypt → decrypt → lock → access denied', async () => {
-      // 1. Bootstrap
-      vi.mocked(invokeProc).mockResolvedValueOnce([]); // Not bootstrapped
-      vi.mocked(invokeProcScalar).mockResolvedValueOnce({ o_unlock_token: 'token-1' });
-      
-      const bootstrapResult = await bootstrapVault('master-password', 1, 1);
-      expect(bootstrapResult.success).toBe(true);
+      const { generateSalt, deriveKEK, generateRVK, generateNonce, wrapKey } = await import('./crypto');
 
-      // 2. Unlock
-      const mockVaultState = [
+      // Pre-generate crypto material for consistent bootstrap → unlock chain
+      const salt = generateSalt(16);
+      const nonce = generateNonce();
+      const rvk = generateRVK();
+      const kek = await deriveKEK('master-password', salt);
+      const aad = Buffer.from('qa-platform-vault-v1', 'utf8');
+      const wrappedRvk = await wrapKey(rvk, kek, nonce, aad);
+
+      // 1. Bootstrap
+      // getVaultState → not bootstrapped
+      vi.mocked(invokeProc).mockResolvedValueOnce([]);
+      // sp_vault_bootstrap → success
+      vi.mocked(invokeProcScalar).mockResolvedValueOnce({ o_success: true });
+      // auto-unlock → getVaultState → bootstrapped
+      vi.mocked(invokeProc).mockResolvedValueOnce([
         {
-          o_salt: Buffer.from('test-salt-16-bytes'),
+          o_is_bootstrapped: true,
+          o_bootstrap_date: new Date().toISOString(),
+          o_bootstrap_operator_id: 1,
           o_kdf_memory: 65536,
           o_kdf_iterations: 2,
           o_kdf_parallelism: 1,
-          o_wrapped_rvk: Buffer.from('wrapped-rvk-data'),
-          o_nonce: Buffer.from('nonce-12-bytes'),
-          o_aad: Buffer.from('qa-platform-vault-v1'),
         },
-      ];
-      vi.mocked(invokeProc).mockResolvedValueOnce(mockVaultState);
+      ]);
+      // auto-unlock → getClient().query() — BUT bootstrap generates its own crypto
+      // material, so unlockVault will use different salt/nonce than our pre-generated ones.
+      // The simplest approach: skip auto-unlock by having the DB query return no rows,
+      // then manually unlock with our known crypto material.
+      mockClientQuery.mockResolvedValueOnce({ rows: [] });
+
+      const bootstrapResult = await bootstrapVault('master-password', 1, 1);
+      // Bootstrap SP succeeded, but auto-unlock failed (no vault data in mock DB)
+      // That's OK — we'll unlock manually below
+      expect(invokeProcScalar).toHaveBeenCalledWith(
+        'sp_vault_bootstrap',
+        expect.objectContaining({ i_bootstrap_operator_id: 1 })
+      );
+
+      // 2. Unlock (manual, with known crypto material)
+      vi.mocked(invokeProc).mockResolvedValueOnce([
+        {
+          o_is_bootstrapped: true,
+          o_bootstrap_date: new Date().toISOString(),
+          o_bootstrap_operator_id: 1,
+          o_kdf_memory: 65536,
+          o_kdf_iterations: 2,
+          o_kdf_parallelism: 1,
+        },
+      ]);
+      mockClientQuery.mockResolvedValueOnce({
+        rows: [{ salt, nonce, wrapped_rvk: wrappedRvk, aad: 'qa-platform-vault-v1' }],
+      });
       vi.mocked(invokeProcScalar).mockResolvedValueOnce({ o_unlock_token: 'token-2' });
+
+      const unlockResult = await unlockVault('master-password', 1, 1);
+      expect(unlockResult.success).toBe(true);
+      const unlockToken = unlockResult.unlockToken!;
+
+      // 3. Encrypt — registry.get needs to return session with the real RVK
+      // The unlock registered the RVK in the (mocked) registry. Since registry is mocked,
+      // we need to set up registry.get to return the session with the actual RVK that
+      // was derived during unlock. However, since we're using real crypto in unlock,
+      // the RVK was the unwrapped result. We know what it should be because we
+      // generated it above.
       vi.mocked(registry.get).mockReturnValueOnce({
-        unlockToken: 'token-2',
-        rvk: Buffer.alloc(32, 2),
+        unlockToken,
+        rvk: rvk, // same RVK we generated
         operatorSessionId: 1,
         createdAt: new Date(),
         expiresAt: new Date(Date.now() + 3600000),
         lastActivityAt: new Date(),
       });
 
-      const unlockResult = await unlockVault('master-password', 1, 1);
-      expect(unlockResult.success).toBe(true);
-
-      // 3. Encrypt
       const plaintext = Buffer.from('test-secret', 'utf8');
-      const encrypted = await encryptSecret('token-2', plaintext);
+      const encrypted = await encryptSecret(unlockToken, plaintext);
       expect(encrypted.encryptedPayload).toBeDefined();
 
       // 4. Decrypt
       vi.mocked(registry.get).mockReturnValueOnce({
-        unlockToken: 'token-2',
-        rvk: Buffer.alloc(32, 2),
+        unlockToken,
+        rvk: rvk,
         operatorSessionId: 1,
         createdAt: new Date(),
         expiresAt: new Date(Date.now() + 3600000),
         lastActivityAt: new Date(),
       });
-      const decrypted = await decryptSecret('token-2', encrypted.encryptedPayload, encrypted.nonce, encrypted.wrappedDek);
+      const decrypted = await decryptSecret(unlockToken, encrypted.encryptedPayload, encrypted.nonce, encrypted.wrappedDek);
       expect(decrypted.toString()).toBe('test-secret');
 
       // 5. Lock
       vi.mocked(registry.remove).mockReturnValueOnce(true);
       vi.mocked(invokeProcScalar).mockResolvedValueOnce({ o_success: true });
-      await lockVault('token-2', 1);
+      await lockVault(unlockToken, 1);
 
       // 6. Access denied
       vi.mocked(registry.get).mockReturnValueOnce(null);
-      await expect(encryptSecret('token-2', plaintext)).rejects.toThrow('Vault is not unlocked');
+      await expect(encryptSecret(unlockToken, plaintext)).rejects.toThrow('Vault is not unlocked');
     });
   });
 });

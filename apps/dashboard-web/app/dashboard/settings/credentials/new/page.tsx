@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import AppShell from '@/components/components/app-shell';
+import AppShell from '@/components/app-shell';
 import { createCredential } from '@/app/actions/credentials';
 import { listSites, listSiteEnvironments, type Site, type SiteEnvironment } from '@/app/actions/sites';
 import { Button } from '@/components/ui/button';

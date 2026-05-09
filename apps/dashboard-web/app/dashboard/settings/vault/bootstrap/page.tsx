@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { bootstrapVaultAction, getVaultStateAction } from '../../../actions/vault';
+import { bootstrapVaultAction, getVaultStateAction } from '../../../../actions/vault';
 
 export default function VaultBootstrapPage() {
   const router = useRouter();

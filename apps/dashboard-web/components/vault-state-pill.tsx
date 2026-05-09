@@ -53,7 +53,7 @@ export function VaultStatePill() {
 
   if (!isBootstrapped) {
     return (
-      <div className="flex items-center gap-2 px-3 py-1.5 bg-yellow-100 border border-yellow-300 rounded-full text-yellow-800 text-sm">
+      <div data-testid="vault-state-pill" className="flex items-center gap-2 px-3 py-1.5 bg-yellow-100 border border-yellow-300 rounded-full text-yellow-800 text-sm">
         <AlertCircle className="w-4 h-4" />
         <span>Vault not initialized</span>
         <button
@@ -68,10 +68,11 @@ export function VaultStatePill() {
 
   if (isUnlocked) {
     return (
-      <div className="flex items-center gap-2 px-3 py-1.5 bg-green-100 border border-green-300 rounded-full text-green-800 text-sm">
+      <div data-testid="vault-state-pill" className="flex items-center gap-2 px-3 py-1.5 bg-green-100 border border-green-300 rounded-full text-green-800 text-sm">
         <Unlock className="w-4 h-4" />
         <span>Vault unlocked</span>
         <button
+          data-testid="lock-vault-button"
           onClick={handleLock}
           disabled={loading}
           className="ml-1 text-green-900 hover:text-green-700 font-medium disabled:opacity-50"
@@ -83,7 +84,7 @@ export function VaultStatePill() {
   }
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 bg-red-100 border border-red-300 rounded-full text-red-800 text-sm">
+    <div data-testid="vault-state-pill" className="flex items-center gap-2 px-3 py-1.5 bg-red-100 border border-red-300 rounded-full text-red-800 text-sm">
       <Lock className="w-4 h-4" />
       <span>Vault locked</span>
       <button

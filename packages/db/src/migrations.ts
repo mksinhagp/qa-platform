@@ -7,9 +7,13 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { PoolClient } from 'pg';
 import { getPool } from './client';
+import { Logger } from '@qa-platform/shared-types';
 
 // Migration record table name
 const MIGRATIONS_TABLE = 'schema_migrations';
+
+// Logger for structured logging
+const logger = new Logger('migrator');
 
 /**
  * Initialize the migrations tracking table if it doesn't exist
@@ -87,17 +91,23 @@ async function applyMigration(
   const checksum = await calculateChecksum(filePath);
   const content = await fs.readFile(filePath, 'utf-8');
 
-  console.log(`Applying migration ${version}: ${path.basename(filePath)}`);
+  logger.info(`Applying migration ${version}`, { file: path.basename(filePath) });
 
-  // Execute the entire file as a single statement
-  // PostgreSQL handles multi-statement files with BEGIN/COMMIT blocks
-  await client.query(content);
+  try {
+    // Execute the entire file as a single statement
+    // PostgreSQL handles multi-statement files with BEGIN/COMMIT blocks
+    await client.query(content);
 
-  // Record the migration
-  await client.query(
-    `INSERT INTO ${MIGRATIONS_TABLE} (version, checksum) VALUES ($1, $2)`,
-    [version, checksum]
-  );
+    // Record the migration
+    await client.query(
+      `INSERT INTO ${MIGRATIONS_TABLE} (version, checksum) VALUES ($1, $2)`,
+      [version, checksum]
+    );
+  } catch (error) {
+    const err = error instanceof Error ? error : new Error(String(error));
+    logger.error(`Failed to apply migration ${version}`, err, { file: path.basename(filePath) });
+    throw new Error(`Migration ${version} (${path.basename(filePath)}) failed: ${err.message}`);
+  }
 }
 
 /**
@@ -127,7 +137,7 @@ export async function runMigrations(options: MigrationOptions = {}): Promise<voi
       if (!applied) {
         await applyMigration(client, filePath);
       } else {
-        console.log(`Skipping already applied migration ${version}`);
+        logger.info(`Skipping already applied migration ${version}`, { file: path.basename(filePath) });
       }
     }
 
@@ -140,15 +150,16 @@ export async function runMigrations(options: MigrationOptions = {}): Promise<voi
       if (!applied) {
         await applyMigration(client, filePath);
       } else {
-        console.log(`Skipping already applied proc ${version}`);
+        logger.info(`Skipping already applied proc ${version}`, { file: path.basename(filePath) });
       }
     }
 
     await client.query('COMMIT');
-    console.log('Migrations completed successfully');
+    logger.info('Migrations completed successfully');
   } catch (error) {
     await client.query('ROLLBACK');
-    console.error('Migration failed:', error);
+    const errMsg = error instanceof Error ? error.message : String(error);
+    logger.error('Migration failed', error instanceof Error ? error : new Error(errMsg));
     throw error;
   } finally {
     client.release();

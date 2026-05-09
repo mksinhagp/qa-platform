@@ -1,6 +1,7 @@
 // Database package exports
-// Provides pg client, transaction helper, proc-invocation wrapper, and migration runner
+// Provides pg client, transaction helper, proc-invocation wrapper
 // Per global rules: All database access must go through stored procedures
+// Note: Migration functions are available via '@qa-platform/db/migrations' for server-side use
 
 export {
   initializePool,
@@ -23,10 +24,3 @@ export {
   type ProcParams,
   type ProcResult,
 } from './procedures';
-
-export {
-  runMigrations,
-  getCurrentVersion,
-  getAppliedMigrations,
-  type MigrationOptions,
-} from './migrations';

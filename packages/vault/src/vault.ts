@@ -96,9 +96,10 @@ export async function bootstrapVault(
   // Wrap RVK with KEK
   const wrappedRvk = await wrapKey(rvk, kek, nonce, aad);
 
-  // Store in database
+  // Store in database (include nonce so unlock can retrieve it)
   const result = await invokeProcScalar('sp_vault_bootstrap', {
     i_salt: salt,
+    i_nonce: nonce,
     i_kdf_memory: env.VAULT_ARGON2ID_MEMORY || 131072,
     i_kdf_iterations: env.VAULT_ARGON2ID_ITERATIONS || 3,
     i_kdf_parallelism: env.VAULT_ARGON2ID_PARALLELISM || 2,
@@ -150,7 +151,7 @@ export async function unlockVault(
   const client = await getClient();
 
   const vaultQuery = `
-    SELECT salt, wrapped_rvk, aad
+    SELECT salt, nonce, wrapped_rvk, aad
     FROM vault_state
     WHERE wrapped_rvk IS NOT NULL
     LIMIT 1
@@ -166,17 +167,20 @@ export async function unlockVault(
   const salt = row.salt;
   const wrappedRvk = row.wrapped_rvk;
   const aad = row.aad ? Buffer.from(row.aad, 'utf8') : undefined;
+  const nonce = row.nonce;
 
   // Derive KEK from master password
   const kek = await deriveKEK(masterPassword, salt);
 
-  // Generate nonce (must be the same as used during wrap)
-  // For now, we'll use a fixed nonce based on salt (not ideal, but works for v1)
-  // TODO: Store nonce in vault_state table
-  const nonce = Buffer.concat([salt.subarray(0, 12)]);
-
   // Unwrap RVK
-  const rvk = await unwrapKey(wrappedRvk, kek, nonce, aad);
+  let rvk: Buffer;
+  try {
+    rvk = await unwrapKey(wrappedRvk, kek, nonce, aad);
+  } catch {
+    // Decryption failed — wrong master password
+    zeroize(kek);
+    return { success: false };
+  }
 
   // Zeroize KEK
   zeroize(kek);
