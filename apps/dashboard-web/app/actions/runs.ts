@@ -178,6 +178,7 @@ export async function listRuns(
 ): Promise<{ success: boolean; runs?: Run[]; hasMore?: boolean; error?: string }> {
   try {
     await requireCapability('run.read');
+    const safePage = Number.isFinite(page) && page > 0 ? Math.floor(page) : 0;
     // Fetch one extra row beyond the page size to detect whether more pages exist
     // without a separate COUNT(*) query.
     const fetchLimit = RUNS_PAGE_SIZE + 1;
@@ -185,7 +186,7 @@ export async function listRuns(
       i_site_id: siteId ?? null,
       i_status: status ?? null,
       i_limit: fetchLimit,
-      i_offset: page * RUNS_PAGE_SIZE,
+      i_offset: safePage * RUNS_PAGE_SIZE,
     });
     const hasMore = result.length === fetchLimit;
     const rows = hasMore ? result.slice(0, RUNS_PAGE_SIZE) : result;

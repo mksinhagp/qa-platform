@@ -22,8 +22,15 @@ import { Logger } from '@qa-platform/shared-types';
 
 const logger = new Logger('execution-manager');
 
+const DEFAULT_CONCURRENCY_CAP = 4;
+
+export function parseConcurrencyCap(rawValue: string | undefined): number {
+  const parsed = Number.parseInt(rawValue ?? String(DEFAULT_CONCURRENCY_CAP), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_CONCURRENCY_CAP;
+}
+
 // Maximum parallel executions (configurable via env)
-const CONCURRENCY_CAP = parseInt(process.env.RUNNER_CONCURRENCY ?? '4', 10);
+const CONCURRENCY_CAP = parseConcurrencyCap(process.env.RUNNER_CONCURRENCY);
 
 export interface ExecutionRequest {
   execution_id: number;
@@ -144,8 +151,9 @@ export class ExecutionManager {
   // Pending resolve callbacks from waitForSlot() — signalled each time running decrements
   private _slotWaiters: Array<() => void> = [];
 
-  constructor(correlationId: string) {
+  constructor(correlationId: string, runId?: number) {
     this._correlationId = correlationId;
+    this._runId = runId ?? null;
   }
 
   /** Enqueue and start processing executions for a run */
@@ -294,7 +302,11 @@ export function getActiveManager(): ExecutionManager | null {
   return activeManager;
 }
 
-export async function startRun(req: RunRequest, correlationId: string): Promise<void> {
+export function __resetActiveManagerForTests(): void {
+  activeManager = null;
+}
+
+export function reserveRun(req: RunRequest, correlationId: string): ExecutionManager {
   // Check and set must be a single synchronous block (no await between them)
   // to prevent the TOCTOU race where two requests both pass the null check
   // before either assigns activeManager.
@@ -302,11 +314,22 @@ export async function startRun(req: RunRequest, correlationId: string): Promise<
     throw new Error('A run is already in progress');
   }
   // Assign synchronously — subsequent calls will see a non-null manager
-  // before this function ever awaits.
-  activeManager = new ExecutionManager(correlationId);
+  // before the route acknowledges the request.
+  activeManager = new ExecutionManager(correlationId, req.run_id);
+  return activeManager;
+}
+
+export async function runReservedRun(manager: ExecutionManager, req: RunRequest): Promise<void> {
   try {
-    await activeManager.startRun(req);
+    await manager.startRun(req);
   } finally {
-    activeManager = null;
+    if (activeManager === manager) {
+      activeManager = null;
+    }
   }
+}
+
+export async function startRun(req: RunRequest, correlationId: string): Promise<void> {
+  const manager = reserveRun(req, correlationId);
+  await runReservedRun(manager, req);
 }

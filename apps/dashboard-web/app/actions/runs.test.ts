@@ -181,6 +181,26 @@ describe('listRuns', () => {
     }));
   });
 
+  it('sanitizes invalid page values before calculating offset', async () => {
+    vi.mocked(invokeProc).mockResolvedValueOnce([]);
+
+    await listRuns(undefined, undefined, -1);
+
+    expect(invokeProc).toHaveBeenCalledWith('sp_runs_list', expect.objectContaining({
+      i_offset: 0,
+    }));
+  });
+
+  it('floors fractional positive page values before calculating offset', async () => {
+    vi.mocked(invokeProc).mockResolvedValueOnce([]);
+
+    await listRuns(undefined, undefined, 2.7);
+
+    expect(invokeProc).toHaveBeenCalledWith('sp_runs_list', expect.objectContaining({
+      i_offset: 100,
+    }));
+  });
+
   it('returns error on failure', async () => {
     vi.mocked(invokeProc).mockRejectedValueOnce(new Error('DB error'));
 

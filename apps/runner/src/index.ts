@@ -1,6 +1,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { Logger, generateCorrelationId } from '@qa-platform/shared-types';
-import { startRun, getActiveManager } from './execution-manager.js';
+import { reserveRun, runReservedRun, getActiveManager, type RunRequest } from './execution-manager.js';
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -40,15 +40,6 @@ app.get('/health', (req: Request, res: Response) => {
 app.post('/run', async (req: Request, res: Response) => {
   const correlationId = req.headers['x-correlation-id'] as string;
 
-  const manager = getActiveManager();
-  if (manager) {
-    res.status(409).json({
-      error: 'A run is already in progress',
-      active_run_id: manager.getRunId(),
-    });
-    return;
-  }
-
   const body = req.body as {
     run_id?: number;
     executions?: unknown[];
@@ -56,6 +47,25 @@ app.post('/run', async (req: Request, res: Response) => {
 
   if (!body.run_id || !Array.isArray(body.executions) || body.executions.length === 0) {
     res.status(400).json({ error: 'run_id and executions[] are required' });
+    return;
+  }
+
+  const runRequest: RunRequest = {
+    run_id: body.run_id,
+    executions: body.executions as RunRequest['executions'],
+  };
+
+  let manager;
+  try {
+    // Reserve the singleton synchronously before acknowledging the request so
+    // a competing /run call receives 409 instead of a false 202 Accepted.
+    manager = reserveRun(runRequest, correlationId);
+  } catch {
+    const activeManager = getActiveManager();
+    res.status(409).json({
+      error: 'A run is already in progress',
+      active_run_id: activeManager?.getRunId() ?? null,
+    });
     return;
   }
 
@@ -72,10 +82,7 @@ app.post('/run', async (req: Request, res: Response) => {
   // Run asynchronously — callbacks report results back to dashboard
   setImmediate(async () => {
     try {
-      await startRun(
-        { run_id: body.run_id as number, executions: body.executions as Parameters<typeof startRun>[0]['executions'] },
-        correlationId,
-      );
+      await runReservedRun(manager, runRequest);
       logger.info(`Run ${body.run_id} completed`, undefined, correlationId);
     } catch (err) {
       logger.error(
