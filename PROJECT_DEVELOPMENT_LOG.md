@@ -1336,3 +1336,89 @@ Created packages/vault with the following structure:
 - Task 14-15: Integration and E2E tests (high priority)
 
 ---
+
+## May 9, 2026 - Phase 1 Task 9 Completed
+
+### Task 9: Credentials CRUD pages (/dashboard/settings/credentials)
+
+**Task Reference**: Master Plan Phase 1, Task 9
+
+#### Work Completed
+
+1. **Created stored procedures for credential retrieval**
+   - `sp_site_credentials_get_by_id` (0052): Get credential by ID
+   - `sp_secret_records_get_by_id` (0053): Get secret record by ID (for decryption)
+
+2. **Created sites server actions** (`app/actions/sites.ts`)
+   - `listSites()`: List all sites for dropdown
+   - `listSiteEnvironments()`: List environments for selected site
+   - Supports active-only filtering
+
+3. **Created audit placeholder** (`app/actions/audit.ts`)
+   - `logAudit()`: Log audit events
+   - `queryAuditLogs()`: Query audit logs with filters
+   - Full implementation in Task 12
+
+4. **Created credentials server actions** (`app/actions/credentials.ts`)
+   - `listCredentials()`: List all site credentials
+   - `getCredential()`: Get credential metadata (no value)
+   - `getCredentialWithValue()`: Get credential with decrypted value (requires vault unlock + secret.reveal)
+   - `createCredential()`: Create new encrypted credential (requires vault unlock)
+   - `updateCredential()`: Update credential with optional re-encryption
+   - All actions check capabilities and vault state
+
+5. **Created credentials list page** (`/dashboard/settings/credentials/page.tsx`)
+   - Table showing site, role, masked value, status
+   - Reveal/hide toggle with Eye/EyeOff icons
+   - Requires vault unlock to reveal values
+   - Edit links to detail page
+   - New Credential button
+
+6. **Created new credential page** (`/dashboard/settings/credentials/new/page.tsx`)
+   - Site and environment dropdowns (cascading)
+   - Role name input
+   - Credential value input (will be encrypted)
+   - Display name and description
+   - Session-only checkbox (ephemeral secrets)
+   - Vault must be unlocked to create
+
+7. **Created edit credential page** (`/dashboard/settings/credentials/[id]/page.tsx`)
+   - Optional new credential value (re-encrypts if provided)
+   - Active/inactive toggle
+   - Role name and site are read-only
+   - Vault must be unlocked to update value
+
+#### Major Decisions
+
+1. **Vault unlock required**: All credential operations that touch encrypted values require the vault to be unlocked. This enforces the security model where secrets are only accessible when the vault is explicitly unlocked.
+
+2. **Capability checks**: 
+   - `site_credentials.manage` for CRUD operations
+   - `secret.reveal` for viewing decrypted values
+
+3. **Reveal pattern**: Credential values are masked (••••••••) by default. Clicking the eye icon decrypts and shows the value temporarily. Clicking again hides it.
+
+4. **Session-only secrets**: Credentials can be marked as session-only, meaning they're stored in the vault but will be deleted when the operator logs out.
+
+5. **Site/Environment selection**: New credentials require selecting a site first, then an environment from that site (cascading dropdowns).
+
+#### Files Changed
+
+- `db/procs/0052_sp_site_credentials_get_by_id.sql` (new)
+- `db/procs/0053_sp_secret_records_get_by_id.sql` (new)
+- `apps/dashboard-web/app/actions/sites.ts` (new)
+- `apps/dashboard-web/app/actions/audit.ts` (new)
+- `apps/dashboard-web/app/actions/credentials.ts` (new)
+- `apps/dashboard-web/app/dashboard/settings/credentials/page.tsx` (new)
+- `apps/dashboard-web/app/dashboard/settings/credentials/new/page.tsx` (new)
+- `apps/dashboard-web/app/dashboard/settings/credentials/[id]/page.tsx` (new)
+
+#### Next Steps
+
+- Task 10: Payment profiles CRUD pages (medium priority)
+- Task 11: Email inboxes CRUD pages (medium priority)
+- Task 12: Audit log viewer (medium priority)
+- Task 13: Approval policies viewer (medium priority)
+- Task 14-15: Integration and E2E tests (high priority)
+
+---
