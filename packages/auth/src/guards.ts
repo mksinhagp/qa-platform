@@ -29,9 +29,10 @@ export class ForbiddenError extends Error {
  * Returns operator context or throws UnauthorizedError
  */
 export async function requireOperator(
-  request: Request
+  request?: Request
 ): Promise<AuthContext> {
-  const sessionToken = request.headers.get('x-session-token');
+  // For server actions, request may be undefined - extract from headers if available
+  const sessionToken = request?.headers.get('x-session-token');
 
   if (!sessionToken) {
     throw new UnauthorizedError('No session token provided');
