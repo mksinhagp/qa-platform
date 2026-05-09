@@ -1254,3 +1254,85 @@ Created packages/vault with the following structure:
 - Commit changes to GitHub
 - Continue with Phase 1 remaining tasks (8-15)
 
+
+---
+
+## May 9, 2026 - Phase 1 Task 8 Completed
+
+### Task 8: Build operator management pages (/dashboard/settings/operators + /new + edit)
+
+**Task Reference**: Master Plan Phase 1, Task 8
+
+#### Work Completed
+
+1. **Created stored procedures for operator listing and retrieval**
+   - `sp_operators_list` (0050): List all operators with optional active filter
+   - `sp_operators_get_by_id` (0051): Get single operator by ID
+
+2. **Created operators server actions** (`app/actions/operators.ts`)
+   - `listOperators()`: List operators with capability check
+   - `getOperator(id)`: Get single operator
+   - `createOperator(input)`: Create new operator with password hashing
+   - `updateOperator(input)`: Update operator with optional password change
+   - All actions protected by `operator.manage` capability
+
+3. **Updated operators list page** (`/dashboard/settings/operators/page.tsx`)
+   - Full CRUD table with login, full name, email, status, created date
+   - Active/Inactive status badges (green/red)
+   - Loading states and empty state
+   - Edit button linking to edit page
+   - New Operator button linking to create page
+
+4. **Created new operator page** (`/dashboard/settings/operators/new/page.tsx`)
+   - Form with login, password, confirm password, full name, email, active checkbox
+   - Client-side validation (12 char password minimum, password match)
+   - Server-side capability check
+   - Loading states and error handling
+   - Cancel/Create buttons
+
+5. **Created edit operator page** (`/dashboard/settings/operators/[id]/page.tsx`)
+   - Pre-populates form with existing operator data
+   - Login field disabled (cannot change)
+   - Optional password change (leave blank to keep current)
+   - All other fields editable
+   - Loading states and error handling
+
+6. **Added shadcn/ui components**
+   - `input.tsx`: Text input component
+   - `label.tsx`: Form label component
+   - `checkbox.tsx`: Checkbox component with Radix UI
+
+#### Major Decisions
+
+1. **Password requirements**: 12 character minimum for operator passwords, matching vault master password standards.
+
+2. **Capability-based access**: All operator management actions require `operator.manage` capability, enforced server-side.
+
+3. **Login immutability**: Login username cannot be changed after creation (enforced via disabled field on edit page).
+
+4. **Optional password change**: On edit, password fields are optional - leaving them blank keeps the current password.
+
+5. **Active status**: Operators can be deactivated (prevent login) without deletion, supporting audit requirements.
+
+#### Files Changed
+
+- `db/procs/0050_sp_operators_list.sql` (new)
+- `db/procs/0051_sp_operators_get_by_id.sql` (new)
+- `apps/dashboard-web/app/actions/operators.ts` (new)
+- `apps/dashboard-web/app/dashboard/settings/operators/page.tsx` (updated)
+- `apps/dashboard-web/app/dashboard/settings/operators/new/page.tsx` (new)
+- `apps/dashboard-web/app/dashboard/settings/operators/[id]/page.tsx` (new)
+- `apps/dashboard-web/components/ui/input.tsx` (new)
+- `apps/dashboard-web/components/ui/label.tsx` (new)
+- `apps/dashboard-web/components/ui/checkbox.tsx` (new)
+
+#### Next Steps
+
+- Task 9: Credentials CRUD pages (medium priority)
+- Task 10: Payment profiles CRUD pages (medium priority)
+- Task 11: Email inboxes CRUD pages (medium priority)
+- Task 12: Audit log viewer (medium priority)
+- Task 13: Approval policies viewer (medium priority)
+- Task 14-15: Integration and E2E tests (high priority)
+
+---
