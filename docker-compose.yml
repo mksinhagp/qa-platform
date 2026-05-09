@@ -1,0 +1,105 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: qa-platform-postgres
+    environment:
+      POSTGRES_DB: qa_platform
+      POSTGRES_USER: qa_user
+      POSTGRES_PASSWORD: qa_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qa_user -d qa_platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - qa-platform-network
+
+  migrator:
+    build:
+      context: .
+      dockerfile: docker/migrator/Dockerfile
+    container_name: qa-platform-migrator
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: qa_platform
+      DB_USER: qa_user
+      DB_PASSWORD: qa_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - qa-platform-network
+
+  dashboard-web:
+    build:
+      context: ./apps/dashboard-web
+      dockerfile: ../../docker/dashboard/Dockerfile
+    container_name: qa-platform-dashboard
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: qa_platform
+      DB_USER: qa_user
+      DB_PASSWORD: qa_password
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    networks:
+      - qa-platform-network
+
+  runner:
+    build:
+      context: ./apps/runner
+      dockerfile: ../../docker/runner/Dockerfile
+    container_name: qa-platform-runner
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+    ports:
+      - "4000:4000"
+    networks:
+      - qa-platform-network
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: qa-platform-ollama
+    profiles:
+      - llm
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    networks:
+      - qa-platform-network
+
+  mailcatcher:
+    image: schickling/mailcatcher:latest
+    container_name: qa-platform-mailcatcher
+    profiles:
+      - dev
+    ports:
+      - "1080:1080"
+      - "1025:1025"
+    networks:
+      - qa-platform-network
+
+volumes:
+  pg_data:
+  ollama_models:
+
+networks:
+  qa-platform-network:
+    driver: bridge

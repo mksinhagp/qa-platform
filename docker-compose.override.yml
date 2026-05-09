@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  postgres:
+    ports:
+      - "5434:5432"
+
+  migrator:
+    volumes:
+      - ./db:/app/db
+      - ./packages/db:/app/packages/db
+
+  dashboard-web:
+    build:
+      context: ./apps/dashboard-web
+      dockerfile: ../../docker/dashboard/Dockerfile
+      target: builder
+    command: pnpm dev
+    volumes:
+      - ./apps/dashboard-web:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      NODE_ENV: development
+
+  runner:
+    command: pnpm dev
+    volumes:
+      - ./apps/runner:/app
+      - /app/node_modules
+    environment:
+      NODE_ENV: development
