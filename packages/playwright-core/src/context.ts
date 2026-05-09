@@ -98,23 +98,38 @@ export async function createPersonaContext(
 
   const context = await browser.newContext(contextOptions);
 
-  // Apply network throttling via the CDP session (Chromium only)
-  // For non-Chromium browsers, throttling is approximated via route delays
+  // Apply network throttling via the CDP session (Chromium only).
+  // For non-Chromium browsers, throttling is approximated via route delays.
+  // If any throttle setup throws unexpectedly (not the expected CDP-unavailable
+  // error), close the context before propagating so it is never leaked.
   try {
-    const cdp = await context.newCDPSession(await context.newPage());
-    const throttle = NETWORK_THROTTLES[persona.network_profile];
-    await cdp.send('Network.emulateNetworkConditions', {
-      offline: false,
-      latency: throttle.latency,
-      downloadThroughput: throttle.downloadThroughput,
-      uploadThroughput: throttle.uploadThroughput,
-    });
-    // Close the temporary page used just for CDP setup
-    const pages = context.pages();
-    if (pages.length > 0) await pages[0].close();
-  } catch {
-    // CDP not available (Firefox/WebKit) — throttle via route delays instead
-    await applyRouteThrottle(context, persona.network_profile);
+    // Capture the specific page used for CDP so we close exactly that page,
+    // not whichever page happens to be first in context.pages().
+    const cdpPage = await context.newPage();
+    let cdpSetupFailed = false;
+    try {
+      const cdp = await context.newCDPSession(cdpPage);
+      const throttle = NETWORK_THROTTLES[persona.network_profile];
+      await cdp.send('Network.emulateNetworkConditions', {
+        offline: false,
+        latency: throttle.latency,
+        downloadThroughput: throttle.downloadThroughput,
+        uploadThroughput: throttle.uploadThroughput,
+      });
+    } catch {
+      // CDP not available (Firefox/WebKit) — fall back to route delays
+      cdpSetupFailed = true;
+    } finally {
+      await cdpPage.close();
+    }
+    if (cdpSetupFailed) {
+      await applyRouteThrottle(context, persona.network_profile);
+    }
+  } catch (err) {
+    // If anything above throws unexpectedly (e.g. newPage() itself fails),
+    // close the context to avoid leaking it before re-throwing.
+    await context.close().catch(() => undefined);
+    throw err;
   }
 
   return context;

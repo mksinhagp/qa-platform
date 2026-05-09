@@ -90,7 +90,13 @@ export async function checkAccessibleLabels(page: Page): Promise<AccessibilityVi
 }
 
 /**
- * Checks focus order matches visual DOM order for keyboard navigation.
+ * Checks focus order for keyboard navigation violations.
+ *
+ * Any element with tabindex > 0 is flagged as a violation. Positive tabindex
+ * values override the natural DOM focus order (WCAG 2.4.3 / Technique F44),
+ * causing screen-reader and keyboard users to jump unpredictably through the
+ * page regardless of whether the assigned values happen to be in ascending
+ * order in the DOM.
  */
 export async function checkFocusOrder(page: Page): Promise<AccessibilityViolation[]> {
   const violations: AccessibilityViolation[] = [];
@@ -100,20 +106,25 @@ export async function checkFocusOrder(page: Page): Promise<AccessibilityViolatio
     'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
   ).all();
 
-  let prevTabIndex = -Infinity;
   for (const el of focusable) {
     const tabIndexAttr = await el.getAttribute('tabindex');
-    const tabIndex = tabIndexAttr !== null ? parseInt(tabIndexAttr, 10) : 0;
+    if (tabIndexAttr === null) continue;
+    const tabIndex = parseInt(tabIndexAttr, 10);
 
-    // tabindex > 0 overrides natural order and is a best-practice violation
-    if (tabIndex > 0 && tabIndex < prevTabIndex) {
+    // Any tabindex > 0 disrupts natural focus order and is a WCAG 2.4.3 violation
+    // (Technique F44). Flag every occurrence — not just descending pairs.
+    if (tabIndex > 0) {
+      const label = ((await el.textContent()) ?? '').trim().slice(0, 40) ||
+        (await el.getAttribute('aria-label')) ||
+        (await el.getAttribute('id')) ||
+        'element';
       violations.push({
         rule: 'focus-order-tabindex',
         severity: 'moderate',
-        description: `Element has tabindex="${tabIndex}" which may disrupt natural focus order`,
+        element: label,
+        description: `Element has tabindex="${tabIndex}" (> 0) which overrides natural DOM focus order (WCAG 2.4.3)`,
       });
     }
-    prevTabIndex = tabIndex;
   }
 
   return violations;

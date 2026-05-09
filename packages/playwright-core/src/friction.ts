@@ -6,7 +6,7 @@
  * collector calculates a 0–100 friction score and returns the raw signals.
  */
 
-import type { Page } from '@playwright/test';
+import type { Page, Request } from '@playwright/test';
 import type { Persona } from '@qa-platform/shared-types';
 
 export type FrictionSignalType =
@@ -77,11 +77,13 @@ export class FrictionCollector {
     });
   }
 
-  /** Record that a field was edited. Emits signal if edited > 2 times. */
+  /** Record that a field was edited. Emits signal exactly once when edited > 2 times. */
   recordFieldEdit(selector: string): void {
     const count = (this.fieldEditCounts.get(selector) ?? 0) + 1;
     this.fieldEditCounts.set(selector, count);
-    if (count > 2) {
+    // Emit the signal exactly once — at count 3 — so it is not duplicated
+    // for every subsequent edit of the same field.
+    if (count === 3) {
       this.record('field_edited_multiple_times', selector, { edit_count: count });
     }
   }
@@ -164,8 +166,11 @@ export function installScrollUpDetector(
   let lastScrollY = 0;
   let submitOccurred = false;
 
-  // Track form submissions
-  const onRequest = () => { submitOccurred = true; };
+  // Track form submissions only — filter to POST requests so that background
+  // XHR/fetch/image/script requests do not false-positively set submitOccurred.
+  const onRequest = (req: Request) => {
+    if (req.method() === 'POST') submitOccurred = true;
+  };
 
   // We use page.evaluate to monitor scrollY changes via MutationObserver/scroll event
   // This is done via CDP injection since Playwright doesn't expose scroll events directly

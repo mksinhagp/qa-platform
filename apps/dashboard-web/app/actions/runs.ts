@@ -169,16 +169,27 @@ export async function listNetworkProfileOptions(): Promise<{ success: boolean; p
 
 // ─── Runs ────────────────────────────────────────────────────────────────────
 
-export async function listRuns(siteId?: number, status?: string): Promise<{ success: boolean; runs?: Run[]; error?: string }> {
+const RUNS_PAGE_SIZE = 50;
+
+export async function listRuns(
+  siteId?: number,
+  status?: string,
+  page = 0,
+): Promise<{ success: boolean; runs?: Run[]; hasMore?: boolean; error?: string }> {
   try {
     await requireCapability('run.read');
+    // Fetch one extra row beyond the page size to detect whether more pages exist
+    // without a separate COUNT(*) query.
+    const fetchLimit = RUNS_PAGE_SIZE + 1;
     const result = await invokeProc('sp_runs_list', {
       i_site_id: siteId ?? null,
       i_status: status ?? null,
-      i_limit: 100,
-      i_offset: 0,
+      i_limit: fetchLimit,
+      i_offset: page * RUNS_PAGE_SIZE,
     });
-    const runs: Run[] = result.map((row: {
+    const hasMore = result.length === fetchLimit;
+    const rows = hasMore ? result.slice(0, RUNS_PAGE_SIZE) : result;
+    const runs: Run[] = rows.map((row: {
       o_id: number; o_name: string; o_description: string | null;
       o_site_id: number; o_site_name: string; o_site_environment_id: number; o_site_env_name: string;
       o_status: string; o_started_by: string; o_started_at: string | null; o_completed_at: string | null;
@@ -198,7 +209,7 @@ export async function listRuns(siteId?: number, status?: string): Promise<{ succ
       notes: row.o_notes, is_pinned: row.o_is_pinned,
       created_date: row.o_created_date, updated_date: row.o_updated_date,
     }));
-    return { success: true, runs };
+    return { success: true, runs, hasMore };
   } catch (error) {
     console.error('List runs error:', error);
     return { success: false, error: 'Failed to list runs' };
@@ -266,15 +277,18 @@ export async function listRunExecutions(runId: number): Promise<{ success: boole
 }
 
 export async function createRun(data: z.infer<typeof createRunSchema>): Promise<{ success: boolean; runId?: number; error?: string; fieldErrors?: Record<string, string> }> {
-  const parsed = createRunSchema.safeParse(data);
-  if (!parsed.success) {
-    const fieldErrors: Record<string, string> = {};
-    parsed.error.errors.forEach(e => { fieldErrors[e.path.join('.')] = e.message; });
-    return { success: false, fieldErrors };
-  }
-
+  // Auth check must come BEFORE Zod validation so that unauthenticated callers
+  // cannot probe the schema by observing field-level error messages.
   try {
     const authContext = await requireCapability('run.execute');
+
+    const parsed = createRunSchema.safeParse(data);
+    if (!parsed.success) {
+      const fieldErrors: Record<string, string> = {};
+      parsed.error.errors.forEach(e => { fieldErrors[e.path.join('.')] = e.message; });
+      return { success: false, fieldErrors };
+    }
+
     const d = parsed.data;
 
     // Build config JSONB

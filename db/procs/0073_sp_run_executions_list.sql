@@ -1,6 +1,11 @@
 BEGIN
 -- Stored procedure: List executions for a run with persona/device/network names
 -- Returns: TABLE with enriched execution rows
+--
+-- LEFT JOINs are used for persona, device, and network so that executions are
+-- never silently dropped if a referenced record is missing or was not seeded.
+-- Missing references produce NULL display names which are coalesced to fallback
+-- values containing the raw ID for easy debugging.
 
 CREATE OR REPLACE FUNCTION sp_run_executions_list(
     i_run_id INTEGER
@@ -33,11 +38,11 @@ BEGIN
         re.id,
         re.run_id,
         re.persona_id,
-        p.display_name AS persona_display_name,
+        COALESCE(p.display_name, '[persona ' || re.persona_id || ']')::VARCHAR(255) AS persona_display_name,
         re.device_profile_id,
-        dp.name AS device_profile_name,
+        COALESCE(dp.name, '[device ' || re.device_profile_id::TEXT || ']')::VARCHAR(100) AS device_profile_name,
         re.network_profile_id,
-        np.name AS network_profile_name,
+        COALESCE(np.name, '[network ' || re.network_profile_id::TEXT || ']')::VARCHAR(100) AS network_profile_name,
         re.browser,
         re.flow_name,
         re.status,
@@ -49,9 +54,9 @@ BEGIN
         re.created_date,
         re.updated_date
     FROM run_executions re
-    JOIN personas p ON p.id = re.persona_id
-    JOIN device_profiles dp ON dp.id = re.device_profile_id
-    JOIN network_profiles np ON np.id = re.network_profile_id
+    LEFT JOIN personas p ON p.id = re.persona_id
+    LEFT JOIN device_profiles dp ON dp.id = re.device_profile_id
+    LEFT JOIN network_profiles np ON np.id = re.network_profile_id
     WHERE re.run_id = i_run_id
     ORDER BY re.created_date ASC;
 END;

@@ -141,6 +141,8 @@ export class ExecutionManager {
   private states: Map<number, ExecutionState> = new Map();
   private _runId: number | null = null;
   private _correlationId: string;
+  // Pending resolve callbacks from waitForSlot() — signalled each time running decrements
+  private _slotWaiters: Array<() => void> = [];
 
   constructor(correlationId: string) {
     this._correlationId = correlationId;
@@ -159,17 +161,41 @@ export class ExecutionManager {
     await this.drain();
   }
 
-  /** Drain the queue up to concurrency cap */
+  /**
+   * Returns a Promise that resolves once a concurrency slot is available.
+   * Callers yield here when CONCURRENCY_CAP is reached.
+   */
+  private waitForSlot(): Promise<void> {
+    if (this.running < CONCURRENCY_CAP) return Promise.resolve();
+    return new Promise(resolve => this._slotWaiters.push(resolve));
+  }
+
+  /** Signal that a slot has freed up; wake the next waiter if any. */
+  private releaseSlot(): void {
+    this.running--;
+    const next = this._slotWaiters.shift();
+    if (next) next();
+  }
+
+  /**
+   * Drain the queue while respecting the concurrency cap.
+   * Executions are dispatched one at a time after acquiring a slot; the
+   * dispatch loop itself awaits only the slot acquisition — not the execution —
+   * so up to CONCURRENCY_CAP executions run truly in parallel.
+   */
   private async drain(): Promise<void> {
-    const slots = CONCURRENCY_CAP - this.running;
-    const batch = this.queue.splice(0, slots);
+    const inFlight: Promise<void>[] = [];
 
-    const promises = batch.map(ex => this.runExecution(ex));
-    await Promise.all(promises);
-
-    if (this.queue.length > 0) {
-      await this.drain();
+    while (this.queue.length > 0) {
+      // Block here until a slot is free (resolves immediately if running < cap)
+      await this.waitForSlot();
+      const ex = this.queue.shift();
+      if (!ex) break; // queue was emptied by a concurrent drain call (shouldn't happen, but guard anyway)
+      inFlight.push(this.runExecution(ex));
     }
+
+    // Wait for all dispatched executions to finish before returning
+    await Promise.all(inFlight);
   }
 
   private async runExecution(ex: ExecutionRequest): Promise<void> {
@@ -232,9 +258,21 @@ export class ExecutionManager {
         this._correlationId,
       );
     } finally {
-      await runner?.teardown();
-      await browser?.close();
-      this.running--;
+      // Teardown and browser close must both run even if the other throws,
+      // so run them independently and collect errors.
+      const cleanupErrors: unknown[] = [];
+      try { await runner?.teardown(); } catch (e) { cleanupErrors.push(e); }
+      try { await browser?.close(); } catch (e) { cleanupErrors.push(e); }
+      // Release the concurrency slot after cleanup so the next queued execution
+      // can start only after resources are fully freed.
+      this.releaseSlot();
+      if (cleanupErrors.length > 0) {
+        logger.warn(
+          `Execution ${ex.execution_id}: cleanup errors after completion`,
+          { errors: cleanupErrors.map(e => String(e)) },
+          this._correlationId,
+        );
+      }
     }
   }
 
@@ -247,7 +285,9 @@ export class ExecutionManager {
   }
 }
 
-// Singleton active manager (one run at a time in Phase 3)
+// Singleton active manager (one run at a time in Phase 3).
+// Reads and writes are synchronous, so the check-and-set in startRun()
+// is atomic within the Node.js event loop — no await between guard and assignment.
 let activeManager: ExecutionManager | null = null;
 
 export function getActiveManager(): ExecutionManager | null {
@@ -255,9 +295,14 @@ export function getActiveManager(): ExecutionManager | null {
 }
 
 export async function startRun(req: RunRequest, correlationId: string): Promise<void> {
+  // Check and set must be a single synchronous block (no await between them)
+  // to prevent the TOCTOU race where two requests both pass the null check
+  // before either assigns activeManager.
   if (activeManager) {
     throw new Error('A run is already in progress');
   }
+  // Assign synchronously — subsequent calls will see a non-null manager
+  // before this function ever awaits.
   activeManager = new ExecutionManager(correlationId);
   try {
     await activeManager.startRun(req);

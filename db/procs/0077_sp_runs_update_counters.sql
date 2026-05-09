@@ -2,6 +2,12 @@ BEGIN
 -- Stored procedure: Recalculate and update run execution counters
 -- Called after each execution status change
 -- Returns: TABLE with updated run id and counters
+--
+-- Terminal execution statuses and their counter buckets:
+--   passed            → successful_executions
+--   friction_flagged  → successful_executions (completed without hard failure)
+--   failed, aborted   → failed_executions
+--   skipped_by_approval → skipped_executions
 
 CREATE OR REPLACE FUNCTION sp_runs_update_counters(
     i_run_id INTEGER,
@@ -24,7 +30,8 @@ DECLARE
 BEGIN
     SELECT
         COUNT(*),
-        COUNT(*) FILTER (WHERE status = 'passed'),
+        -- friction_flagged counts as successful: the run completed, it just had notable friction
+        COUNT(*) FILTER (WHERE status IN ('passed', 'friction_flagged')),
         COUNT(*) FILTER (WHERE status IN ('failed', 'aborted')),
         COUNT(*) FILTER (WHERE status = 'skipped_by_approval')
     INTO v_total, v_successful, v_failed, v_skipped

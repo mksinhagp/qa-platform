@@ -94,18 +94,24 @@ function ExecCounts({ run }: { run: Run }) {
 export default function RunsPage() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [page, setPage] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    loadRuns();
+    loadRuns(0);
   }, []);
 
-  async function loadRuns() {
+  async function loadRuns(pageIndex: number) {
     try {
-      setLoading(true);
-      const result = await listRuns();
+      if (pageIndex === 0) setLoading(true);
+      else setLoadingMore(true);
+      const result = await listRuns(undefined, undefined, pageIndex);
       if (result.success && result.runs) {
-        setRuns(result.runs);
+        setRuns(prev => pageIndex === 0 ? result.runs! : [...prev, ...result.runs!]);
+        setHasMore(result.hasMore ?? false);
+        setPage(pageIndex);
       } else {
         setError(result.error ?? 'Failed to load runs');
       }
@@ -113,6 +119,7 @@ export default function RunsPage() {
       setError('An error occurred while loading runs');
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
   }
 
@@ -201,6 +208,21 @@ export default function RunsPage() {
                 ))}
               </tbody>
             </table>
+            {hasMore && (
+              <div className="border-t border-zinc-100 px-4 py-3 text-center">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => loadRuns(page + 1)}
+                  disabled={loadingMore}
+                  className="text-zinc-600 hover:text-zinc-900"
+                >
+                  {loadingMore
+                    ? <><Loader2 className="w-3 h-3 mr-1.5 animate-spin" /> Loading…</>
+                    : 'Load more runs'}
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </div>

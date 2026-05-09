@@ -11,7 +11,7 @@
 
 import type { Browser, Page } from '@playwright/test';
 import type { Persona } from '@qa-platform/shared-types';
-import { AssistiveTech } from '@qa-platform/shared-types';
+import { AssistiveTech, MotorProfile } from '@qa-platform/shared-types';
 import { createPersonaContext } from './context.js';
 import { personaType, personaHesitate, personaClick } from './typing.js';
 import { runPersonaAccessibilityCheck, type AccessibilityResult } from './accessibility.js';
@@ -128,7 +128,7 @@ export class PersonaRunner {
           // Run accessibility check at each step for relevant personas
           if (
             this._persona.assistive_tech !== AssistiveTech.NONE ||
-            this._persona.motor_profile !== 'normal' ||
+            this._persona.motor_profile !== MotorProfile.NORMAL ||
             this._persona.comprehension_grade_level <= 6
           ) {
             const a11y = await runPersonaAccessibilityCheck(this._page!, this._persona);
