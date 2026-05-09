@@ -16,6 +16,7 @@ export default defineConfig({
     include: [
       'packages/*/src/**/*.test.ts',
       'apps/*/src/**/*.test.ts',
+      'apps/*/app/**/*.test.ts',
     ],
     exclude: ['node_modules', 'dist', '.next', '**/node_modules/**'],
     setupFiles: ['./vitest.setup.ts'],
