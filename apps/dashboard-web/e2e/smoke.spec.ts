@@ -15,27 +15,39 @@ const API_BASE = 'http://localhost:3000';
 
 // Helper function to create operator via API
 async function createTestOperator() {
-  // Use direct DB call via API endpoint or server action
-  const response = await fetch(`${API_BASE}/api/test/setup`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      action: 'createOperator',
-      operator: TEST_OPERATOR
-    }),
-  });
-  if (!response.ok) {
-    console.log('Operator may already exist, continuing...');
+  try {
+    // Use direct DB call via API endpoint or server action
+    const response = await fetch(`${API_BASE}/api/test/setup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'createOperator',
+        operator: TEST_OPERATOR
+      }),
+    });
+    if (!response.ok) {
+      console.log('Operator may already exist, continuing...');
+    } else {
+      const result = await response.json();
+      console.log('Test operator created:', result);
+    }
+  } catch (error) {
+    console.error('Failed to create test operator:', error);
+    // Continue anyway - operator may already exist
   }
 }
 
 // Helper to reset vault state
 async function resetVaultState() {
-  await fetch(`${API_BASE}/api/test/setup`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action: 'resetVault' }),
-  });
+  try {
+    await fetch(`${API_BASE}/api/test/setup`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'resetVault' }),
+    });
+  } catch (error) {
+    console.error('Failed to reset vault state:', error);
+  }
 }
 
 test.describe('Smoke Tests - Vault and Auth Flow', () => {
@@ -111,9 +123,9 @@ test.describe('Smoke Tests - Vault and Auth Flow', () => {
     // Step 7: Attempt to reveal credential - should be denied
     // Try to view the credential
     await page.goto('/dashboard/settings/credentials');
-    
+
     // Click reveal button (eye icon)
-    await page.click('button[title="Reveal"]').first();
+    await page.locator('button[title="Reveal"]').first().click();
     
     // Should show error or redirect to unlock page
     // The UI should show an error message
