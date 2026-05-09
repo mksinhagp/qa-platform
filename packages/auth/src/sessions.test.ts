@@ -33,8 +33,8 @@ describe('sessions', () => {
         i_session_token: expect.any(String),
         i_ip_address: '127.0.0.1',
         i_user_agent: 'Test-Agent',
-        i_idle_timeout_hours: 8,
-        i_absolute_timeout_days: 30,
+        i_idle_timeout_seconds: 28800,
+        i_absolute_timeout_seconds: 2592000,
         i_created_by: 'testuser',
       });
     });
@@ -141,8 +141,8 @@ describe('sessions', () => {
       expect(invokeProcScalar).toHaveBeenCalledWith(
         'sp_operator_sessions_create',
         expect.objectContaining({
-          i_idle_timeout_hours: 8, // From vitest.setup.ts
-          i_absolute_timeout_days: 30,
+          i_idle_timeout_seconds: 28800, // From vitest.setup.ts
+          i_absolute_timeout_seconds: 2592000,
         })
       );
     });

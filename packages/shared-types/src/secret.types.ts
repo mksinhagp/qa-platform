@@ -61,8 +61,8 @@ export interface SecretAccessLog {
  */
 export interface SiteCredential {
   id: string;
-  site_id: string;
-  site_environment_id: string;
+  site_id: number;
+  site_environment_id: number;
   role: string;
   secret_record_id?: string;
   session_only_value?: string;

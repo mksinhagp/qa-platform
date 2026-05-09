@@ -18,10 +18,19 @@ class UnlockSessionRegistry {
   private cleanupInterval: NodeJS.Timeout | null = null;
 
   constructor() {
-    // Cleanup expired sessions every minute
-    this.cleanupInterval = setInterval(() => {
-      this.cleanupExpiredSessions();
-    }, 60 * 1000);
+    // Interval is started lazily on first register() call
+  }
+
+  private ensureCleanupInterval(): void {
+    if (!this.cleanupInterval) {
+      this.cleanupInterval = setInterval(() => {
+        this.cleanupExpiredSessions();
+      }, 60 * 1000);
+      // Allow the process / test runner to exit even if the interval is active
+      if (this.cleanupInterval.unref) {
+        this.cleanupInterval.unref();
+      }
+    }
   }
 
   /**
@@ -40,6 +49,8 @@ class UnlockSessionRegistry {
     operatorSessionId: number,
     ttlSeconds: number
   ): void {
+    this.ensureCleanupInterval();
+
     const now = new Date();
     const expiresAt = new Date(now.getTime() + ttlSeconds * 1000);
 
@@ -107,9 +118,14 @@ class UnlockSessionRegistry {
   private cleanupExpiredSessions(): void {
     const now = new Date();
     const expiredTokens: string[] = [];
+    // Use the default idle reset seconds; the cleanup is a safety net
+    // for sessions that are no longer being accessed via get().
+    const idleResetMs = (parseInt(process.env.VAULT_UNLOCK_IDLE_RESET_SECONDS || '300', 10)) * 1000;
 
     for (const [token, session] of this.sessions.entries()) {
-      if (now > session.expiresAt) {
+      const isAbsoluteExpired = now > session.expiresAt;
+      const isIdleExpired = (now.getTime() - session.lastActivityAt.getTime()) > idleResetMs;
+      if (isAbsoluteExpired || isIdleExpired) {
         expiredTokens.push(token);
       }
     }

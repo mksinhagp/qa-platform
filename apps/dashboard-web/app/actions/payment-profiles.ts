@@ -164,7 +164,7 @@ export async function createPaymentProfile(
 
     // Encrypt the secret
     const plaintext = Buffer.from(JSON.stringify(secretPayload), 'utf8');
-    const { encryptedPayload, nonce, wrappedDek } = await encryptSecret(
+    const { encryptedPayload, nonce, wrappedDek, wrapNonce } = await encryptSecret(
       unlockToken,
       plaintext
     );
@@ -177,6 +177,7 @@ export async function createPaymentProfile(
       i_description: input.description || null,
       i_encrypted_payload: encryptedPayload,
       i_nonce: nonce,
+      i_wrap_nonce: wrapNonce,
       i_aad: Buffer.from('qa-platform-secret-v1', 'utf8'),
       i_wrapped_dek: wrappedDek,
       i_kdf_version: 1,

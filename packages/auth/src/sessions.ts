@@ -43,18 +43,22 @@ export async function createSession(
   const sessionToken = generateSessionToken();
   const env = getEnv();
 
-  const idleTimeoutHours = Math.floor(env.AUTH_SESSION_IDLE_TIMEOUT_SECONDS / 3600);
-  const absoluteTimeoutDays = Math.floor(env.AUTH_SESSION_ABSOLUTE_TIMEOUT_SECONDS / 86400);
+  const idleTimeoutSeconds = env.AUTH_SESSION_IDLE_TIMEOUT_SECONDS || 28800;     // default 8 hours
+  const absoluteTimeoutSeconds = env.AUTH_SESSION_ABSOLUTE_TIMEOUT_SECONDS || 2592000; // default 30 days
 
   const result = await invokeProcScalar('sp_operator_sessions_create', {
     i_operator_id: operatorId,
     i_session_token: sessionToken,
     i_ip_address: ipAddress || null,
     i_user_agent: userAgent || null,
-    i_idle_timeout_hours: idleTimeoutHours || 8,
-    i_absolute_timeout_days: absoluteTimeoutDays || 30,
+    i_idle_timeout_seconds: idleTimeoutSeconds,
+    i_absolute_timeout_seconds: absoluteTimeoutSeconds,
     i_created_by: createdBy,
   });
+
+  if (!result) {
+    throw new Error('Session creation failed: stored procedure returned no result');
+  }
 
   return {
     id: result.o_id,
@@ -77,11 +81,11 @@ export async function validateSession(
 ): Promise<ValidationResult> {
   const env = getEnv();
 
-  const idleTimeoutHours = Math.floor(env.AUTH_SESSION_IDLE_TIMEOUT_SECONDS / 3600);
+  const idleTimeoutSeconds = env.AUTH_SESSION_IDLE_TIMEOUT_SECONDS || 28800;
 
   const result = await invokeProc('sp_operator_sessions_validate', {
     i_session_token: sessionToken,
-    i_idle_timeout_hours: idleTimeoutHours || 8,
+    i_idle_timeout_seconds: idleTimeoutSeconds,
   });
 
   if (result.length === 0) {
@@ -110,5 +114,5 @@ export async function revokeSession(
     i_updated_by: updatedBy,
   });
 
-  return result.o_success;
+  return result?.o_success ?? false;
 }

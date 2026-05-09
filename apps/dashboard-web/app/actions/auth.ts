@@ -2,7 +2,7 @@
 
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { hashPassword, verifyPassword, createSession, revokeSession } from '@qa-platform/auth';
+import { verifyPassword, createSession, revokeSession } from '@qa-platform/auth';
 import { invokeProc } from '@qa-platform/db';
 
 export interface LoginResult {
@@ -81,8 +81,8 @@ export async function logout(): Promise<void> {
 }
 
 export async function getSession(): Promise<{
-  operatorId?: number;
-  sessionId?: number;
+  operatorId: number;
+  sessionId: number;
 } | null> {
   const cookieStore = await cookies();
   const sessionToken = cookieStore.get('session_token')?.value;

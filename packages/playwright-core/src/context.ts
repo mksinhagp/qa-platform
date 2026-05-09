@@ -93,7 +93,7 @@ export async function createPersonaContext(
     reducedMotion:
       persona.assistive_tech === AssistiveTech.SCREEN_READER ? 'reduce' : 'no-preference',
     // Record video and traces for every execution
-    recordVideo: { dir: '/tmp/qa-platform-videos' },
+    recordVideo: { dir: `${process.env.ARTIFACT_ROOT_PATH || '/tmp/qa-platform-videos'}/videos` },
   };
 
   const context = await browser.newContext(contextOptions);

@@ -152,7 +152,7 @@ export async function createEmailInbox(
 
     // Encrypt the password
     const plaintext = Buffer.from(input.password, 'utf8');
-    const { encryptedPayload, nonce, wrappedDek } = await encryptSecret(
+    const { encryptedPayload, nonce, wrappedDek, wrapNonce } = await encryptSecret(
       unlockToken,
       plaintext
     );
@@ -165,6 +165,7 @@ export async function createEmailInbox(
       i_description: `Password for ${input.username}`,
       i_encrypted_payload: encryptedPayload,
       i_nonce: nonce,
+      i_wrap_nonce: wrapNonce,
       i_aad: Buffer.from('qa-platform-secret-v1', 'utf8'),
       i_wrapped_dek: wrappedDek,
       i_kdf_version: 1,
@@ -245,7 +246,7 @@ export async function updateEmailInbox(
     // If password provided, update secret
     if (input.password && unlockToken) {
       const plaintext = Buffer.from(input.password, 'utf8');
-      const { encryptedPayload, nonce, wrappedDek } = await encryptSecret(
+      const { encryptedPayload, nonce, wrappedDek, wrapNonce } = await encryptSecret(
         unlockToken,
         plaintext
       );
@@ -254,6 +255,7 @@ export async function updateEmailInbox(
         i_id: secretId,
         i_encrypted_payload: encryptedPayload,
         i_nonce: nonce,
+        i_wrap_nonce: wrapNonce,
         i_aad: Buffer.from('qa-platform-secret-v1', 'utf8'),
         i_wrapped_dek: wrappedDek,
         i_updated_by: authContext.operatorId?.toString() || 'system',

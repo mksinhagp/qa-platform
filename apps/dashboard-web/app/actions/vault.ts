@@ -1,19 +1,16 @@
 'use server';
 
 import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
 import { getSession } from './auth';
 
 export interface VaultBootstrapResult {
   success: boolean;
   error?: string;
-  unlockToken?: string;
 }
 
 export interface VaultUnlockResult {
   success: boolean;
   error?: string;
-  unlockToken?: string;
 }
 
 export async function bootstrapVaultAction(
@@ -70,7 +67,7 @@ export async function bootstrapVaultAction(
       });
     }
 
-    return { success: true, unlockToken };
+    return { success: true };
   } catch (error) {
     console.error('Vault bootstrap error:', error);
     return { success: false, error: 'An error occurred during vault bootstrap' };
@@ -119,7 +116,7 @@ export async function unlockVaultAction(
       });
     }
 
-    return { success: true, unlockToken: result.unlockToken };
+    return { success: true };
   } catch (error) {
     console.error('Vault unlock error:', error);
     return { success: false, error: 'An error occurred during vault unlock' };

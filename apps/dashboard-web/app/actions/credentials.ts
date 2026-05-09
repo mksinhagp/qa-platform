@@ -1,7 +1,7 @@
 'use server';
 
 import { cookies } from 'next/headers';
-import { invokeProc } from '@qa-platform/db';
+import { invokeProc, invokeProcWrite } from '@qa-platform/db';
 import { requireCapability, requireOperator } from '@qa-platform/auth';
 import { encryptSecret, decryptSecret, withUnlocked } from '@qa-platform/vault';
 import { logAudit } from './audit';
@@ -167,13 +167,21 @@ export async function getCredentialWithValue(
 
     const secretRow = secretResult[0];
 
-    // Decrypt secret value
-    const plaintext = await decryptSecret(
-      unlockToken,
-      secretRow.o_encrypted_payload,
-      secretRow.o_nonce,
-      secretRow.o_wrapped_dek
-    );
+    // Decrypt secret value — pass wrap_nonce if present (new envelope format)
+    const plaintext = secretRow.o_wrap_nonce
+      ? await decryptSecret(
+          unlockToken,
+          secretRow.o_encrypted_payload,
+          secretRow.o_nonce,
+          secretRow.o_wrapped_dek,
+          secretRow.o_wrap_nonce,
+        )
+      : await decryptSecret(
+          unlockToken,
+          secretRow.o_encrypted_payload,
+          secretRow.o_nonce,
+          secretRow.o_wrapped_dek,
+        );
 
     const credentialValue = plaintext.toString('utf8');
 
@@ -219,19 +227,20 @@ export async function createCredential(
 
     // Encrypt the credential value
     const plaintext = Buffer.from(input.credential_value, 'utf8');
-    const { encryptedPayload, nonce, wrappedDek } = await encryptSecret(
+    const { encryptedPayload, nonce, wrappedDek, wrapNonce } = await encryptSecret(
       unlockToken,
       plaintext
     );
 
-    // Create secret record
-    const secretResult = await invokeProc('sp_secret_records_insert', {
+    // Create secret record (transactional)
+    const secretResult = await invokeProcWrite('sp_secret_records_insert', {
       i_category: 'site_credential',
       i_owner_scope: `site:${input.site_id}`,
       i_name: input.name,
       i_description: input.description || null,
       i_encrypted_payload: encryptedPayload,
       i_nonce: nonce,
+      i_wrap_nonce: wrapNonce,
       i_aad: Buffer.from('qa-platform-secret-v1', 'utf8'),
       i_wrapped_dek: wrappedDek,
       i_kdf_version: 1,
@@ -245,8 +254,8 @@ export async function createCredential(
 
     const secretId = secretResult[0].o_id;
 
-    // Create site credential reference
-    const credResult = await invokeProc('sp_site_credentials_insert', {
+    // Create site credential reference (transactional)
+    const credResult = await invokeProcWrite('sp_site_credentials_insert', {
       i_site_id: input.site_id,
       i_site_environment_id: input.site_environment_id,
       i_role_name: input.role_name,
@@ -306,15 +315,16 @@ export async function updateCredential(
     // If credential value provided, update secret
     if (input.credential_value && unlockToken) {
       const plaintext = Buffer.from(input.credential_value, 'utf8');
-      const { encryptedPayload, nonce, wrappedDek } = await encryptSecret(
+      const { encryptedPayload, nonce, wrappedDek, wrapNonce } = await encryptSecret(
         unlockToken,
         plaintext
       );
 
-      await invokeProc('sp_secret_records_update', {
+      await invokeProcWrite('sp_secret_records_update', {
         i_id: secretId,
         i_encrypted_payload: encryptedPayload,
         i_nonce: nonce,
+        i_wrap_nonce: wrapNonce,
         i_aad: Buffer.from('qa-platform-secret-v1', 'utf8'),
         i_wrapped_dek: wrappedDek,
         i_updated_by: authContext.operatorId?.toString() || 'system',

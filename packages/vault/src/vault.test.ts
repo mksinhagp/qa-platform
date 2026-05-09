@@ -88,11 +88,11 @@ describe('vault', () => {
       vi.mocked(invokeProc).mockResolvedValueOnce([]);
 
       // 2. invokeProcScalar('sp_vault_bootstrap') → capture args and return success
-      vi.mocked(invokeProcScalar).mockImplementationOnce(async (_proc, params) => {
-        capturedSalt = params!.i_salt as Buffer;
-        capturedNonce = params!.i_nonce as Buffer;
-        capturedWrappedRvk = params!.i_wrapped_rvk as Buffer;
-        capturedAad = params!.i_aad as string;
+      vi.mocked(invokeProcScalar).mockImplementationOnce(async (_proc, params: Record<string, unknown> = {}) => {
+        capturedSalt = params.i_salt as Buffer;
+        capturedNonce = params.i_nonce as Buffer;
+        capturedWrappedRvk = params.i_wrapped_rvk as Buffer;
+        capturedAad = params.i_aad as string;
         return { o_success: true };
       });
 
@@ -108,15 +108,16 @@ describe('vault', () => {
         },
       ]);
 
-      // 4. unlockVault → getClient().query() → return captured vault data
-      mockClientQuery.mockImplementationOnce(async () => ({
-        rows: [{
-          salt: capturedSalt,
-          nonce: capturedNonce,
-          wrapped_rvk: capturedWrappedRvk,
-          aad: capturedAad,
-        }],
-      }));
+      // 4. unlockVault → invokeProc('sp_vault_state_get_crypto') → return captured vault data
+      // Must use mockImplementationOnce so captured values are read at call-time (after bootstrap populates them)
+      vi.mocked(invokeProc).mockImplementationOnce(async () => [
+        {
+          o_salt: capturedSalt,
+          o_nonce: capturedNonce,
+          o_wrapped_rvk: capturedWrappedRvk,
+          o_aad: capturedAad,
+        },
+      ]);
 
       // 5. unlockVault → invokeProcScalar('sp_vault_unlock_session_create') → success
       vi.mocked(invokeProcScalar).mockResolvedValueOnce({ o_unlock_token: 'unlock-token' });
@@ -169,15 +170,15 @@ describe('vault', () => {
         },
       ]);
 
-      // 2. getClient().query() → vault row
-      mockClientQuery.mockResolvedValueOnce({
-        rows: [{
-          salt,
-          nonce,
-          wrapped_rvk: wrappedRvk,
-          aad: 'qa-platform-vault-v1',
-        }],
-      });
+      // 2. invokeProc('sp_vault_state_get_crypto') → vault row
+      vi.mocked(invokeProc).mockResolvedValueOnce([
+        {
+          o_salt: salt,
+          o_nonce: nonce,
+          o_wrapped_rvk: wrappedRvk,
+          o_aad: 'qa-platform-vault-v1',
+        },
+      ]);
 
       // 3. invokeProcScalar('sp_vault_unlock_session_create') → success
       vi.mocked(invokeProcScalar).mockResolvedValueOnce({ o_unlock_token: 'unlock-token-456' });
@@ -210,15 +211,15 @@ describe('vault', () => {
         },
       ]);
 
-      // 2. getClient().query() → vault row
-      mockClientQuery.mockResolvedValueOnce({
-        rows: [{
-          salt,
-          nonce,
-          wrapped_rvk: wrappedRvk,
-          aad: 'qa-platform-vault-v1',
-        }],
-      });
+      // 2. invokeProc('sp_vault_state_get_crypto') → vault row
+      vi.mocked(invokeProc).mockResolvedValueOnce([
+        {
+          o_salt: salt,
+          o_nonce: nonce,
+          o_wrapped_rvk: wrappedRvk,
+          o_aad: 'qa-platform-vault-v1',
+        },
+      ]);
 
       // Try to unlock with wrong password — unwrapKey will throw
       const result = await unlockVault('wrong-password', 1, 1);
@@ -344,7 +345,8 @@ describe('vault', () => {
         'valid-token',
         encrypted.encryptedPayload,
         encrypted.nonce,
-        encrypted.wrappedDek
+        encrypted.wrappedDek,
+        encrypted.wrapNonce,
       );
 
       expect(decrypted.toString('utf8')).toBe('secret-data');
@@ -379,13 +381,13 @@ describe('vault', () => {
           o_kdf_parallelism: 1,
         },
       ]);
-      // auto-unlock → getClient().query() — BUT bootstrap generates its own crypto
-      // material, so unlockVault will use different salt/nonce than our pre-generated ones.
-      // The simplest approach: skip auto-unlock by having the DB query return no rows,
+      // auto-unlock → invokeProc('sp_vault_state_get_crypto') — BUT bootstrap generates
+      // its own crypto material, so unlockVault will use different salt/nonce than our
+      // pre-generated ones. The simplest approach: skip auto-unlock by returning no rows,
       // then manually unlock with our known crypto material.
-      mockClientQuery.mockResolvedValueOnce({ rows: [] });
+      vi.mocked(invokeProc).mockResolvedValueOnce([]);
 
-      const bootstrapResult = await bootstrapVault('master-password', 1, 1);
+      await bootstrapVault('master-password', 1, 1);
       // Bootstrap SP succeeded, but auto-unlock failed (no vault data in mock DB)
       // That's OK — we'll unlock manually below
       expect(invokeProcScalar).toHaveBeenCalledWith(
@@ -394,6 +396,7 @@ describe('vault', () => {
       );
 
       // 2. Unlock (manual, with known crypto material)
+      // getVaultState() → bootstrapped
       vi.mocked(invokeProc).mockResolvedValueOnce([
         {
           o_is_bootstrapped: true,
@@ -404,9 +407,10 @@ describe('vault', () => {
           o_kdf_parallelism: 1,
         },
       ]);
-      mockClientQuery.mockResolvedValueOnce({
-        rows: [{ salt, nonce, wrapped_rvk: wrappedRvk, aad: 'qa-platform-vault-v1' }],
-      });
+      // invokeProc('sp_vault_state_get_crypto') → vault crypto material
+      vi.mocked(invokeProc).mockResolvedValueOnce([
+        { o_salt: salt, o_nonce: nonce, o_wrapped_rvk: wrappedRvk, o_aad: 'qa-platform-vault-v1' },
+      ]);
       vi.mocked(invokeProcScalar).mockResolvedValueOnce({ o_unlock_token: 'token-2' });
 
       const unlockResult = await unlockVault('master-password', 1, 1);
@@ -441,7 +445,7 @@ describe('vault', () => {
         expiresAt: new Date(Date.now() + 3600000),
         lastActivityAt: new Date(),
       });
-      const decrypted = await decryptSecret(unlockToken, encrypted.encryptedPayload, encrypted.nonce, encrypted.wrappedDek);
+      const decrypted = await decryptSecret(unlockToken, encrypted.encryptedPayload, encrypted.nonce, encrypted.wrappedDek, encrypted.wrapNonce);
       expect(decrypted.toString()).toBe('test-secret');
 
       // 5. Lock

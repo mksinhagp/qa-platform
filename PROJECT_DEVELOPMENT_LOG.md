@@ -2516,3 +2516,71 @@ Implemented in `packages/playwright-core/src/friction.ts` (see Task 2 above):
 - Artifact retention cleanup job
 
 ---
+
+## May 9, 2026 - Bug Fixes Completed
+
+### Code Review and Bug Remediation
+
+**Objective**: Review entire codebase for bugs, security issues, and code quality problems. Fix all identified issues and ensure all tests pass.
+
+#### Work Completed
+
+Comprehensive code review of all packages, apps, database scripts, and Docker configuration. Identified and fixed 13 bugs across critical/high/medium/low severity.
+
+**Critical/High fixes:**
+1. **payment-profiles.ts and email-inboxes.ts** - Added missing `wrapNonce` to `encryptSecret` destructuring and `i_wrap_nonce` param to stored procedure calls. Without this, secrets were undecryptable because the DEK wrapping nonce was never persisted.
+2. **Created `db/procs/0080_sp_vault_state_get_crypto.sql`** - Missing stored procedure that `unlockVault()` calls to retrieve salt, nonce, wrapped_rvk, and aad from vault_state table. Without this, unlock would fail at runtime.
+3. **Docker Compose** - Fixed env var names from `DB_*` to `POSTGRES_*` to match the Zod schema in `env.schema.ts`. Added `DASHBOARD_SESSION_SECRET` env var (required by Zod). Removed deprecated `version: '3.8'` key.
+
+**Medium fixes:**
+4. **sessions.ts** - Added null-check in `createSession` (throws Error on null result) and `revokeSession` (returns false via `??` operator). Without this, accessing properties on null would throw TypeError.
+5. **credentials.ts** - Changed `invokeProc` to `invokeProcWrite` for `sp_secret_records_insert`, `sp_site_credentials_insert`, and `sp_secret_records_update` to ensure transactional writes. Prevents orphaned records on failure.
+6. **vault.ts action** - Removed `unlockToken` from server action response bodies (bootstrap + unlock). Token is only stored as httpOnly cookie for security.
+
+**Low fixes:**
+7. **SiteCredential type** - Changed `site_id` and `site_environment_id` from `string` to `number` to match database schema and dashboard action types.
+8. **context.ts** - Replaced hardcoded `/tmp/qa-platform-videos` with `process.env.ARTIFACT_ROOT_PATH` fallback to respect configured artifact path.
+9. **auth.ts action** - Removed unused `hashPassword` import.
+10. **vault registry** - Added idle timeout check to `cleanupExpiredSessions()` so abandoned sessions with idle-expired RVK are zeroized promptly, not just on `get()` access.
+
+**Test fixes:**
+- **sessions.test.ts** - Updated expected params from `i_idle_timeout_hours`/`i_absolute_timeout_days` to `i_idle_timeout_seconds`/`i_absolute_timeout_seconds` to match current implementation.
+- **vault.test.ts** - Updated mocks from `mockClientQuery` to `invokeProc` mocks for `sp_vault_state_get_crypto`. Fixed `decryptSecret` calls to pass `wrapNonce`. Fixed lint errors (added type assertion for mock params).
+
+#### Major Decisions
+
+1. **wrapNonce is critical**: The separate nonce for DEK wrapping is essential for security. Without storing it, secrets cannot be decrypted. This was a data loss bug in payment profile and email inbox encryption.
+
+2. **Docker env var alignment**: The Zod schema defines the contract. Docker Compose must match exactly. Mismatch would cause startup failures due to validation errors.
+
+3. **Transaction safety**: All write operations should use `invokeProcWrite` to ensure atomicity. Non-transactional writes risk orphaned records on partial failures.
+
+4. **Security: token in cookie only**: Returning unlock token in response body exposes it to client-side JS, undermining httpOnly cookie protection. The cookie-only approach is correct.
+
+5. **Type consistency**: Shared types must match the actual database schema. String vs number mismatches cause runtime type coercion issues.
+
+#### Test Results
+
+**All 128 tests pass across 11 test files** (was 122 before vault test fixes).
+
+#### Files Modified
+
+- `apps/dashboard-web/app/actions/payment-profiles.ts`
+- `apps/dashboard-web/app/actions/email-inboxes.ts`
+- `apps/dashboard-web/app/actions/credentials.ts`
+- `apps/dashboard-web/app/actions/vault.ts`
+- `apps/dashboard-web/app/actions/auth.ts`
+- `packages/auth/src/sessions.ts`
+- `packages/vault/src/registry.ts`
+- `packages/shared-types/src/secret.types.ts`
+- `packages/playwright-core/src/context.ts`
+- `docker-compose.yml`
+- **New:** `db/procs/0080_sp_vault_state_get_crypto.sql`
+- `packages/auth/src/sessions.test.ts`
+- `packages/vault/src/vault.test.ts`
+
+#### Commits
+
+- Bug fixes: security, null-safety, transaction safety, Docker env alignment, type consistency
+
+---
