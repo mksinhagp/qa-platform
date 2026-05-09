@@ -22,9 +22,9 @@ ENV NODE_ENV production
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 runner
 
-COPY --from=base /app/dist ./dist
-COPY --from=base /app/node_modules ./node_modules
-COPY --from=base /app/package.json ./package.json
+COPY --from=base /workspace/apps/runner/dist ./dist
+COPY --from=base /workspace/node_modules ./node_modules
+COPY --from=base /workspace/apps/runner/package.json ./package.json
 
 USER runner
 
