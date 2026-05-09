@@ -3,13 +3,22 @@
 import { cookies } from 'next/headers';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { verifyPassword, createSession, revokeSession } from '@qa-platform/auth';
+import { verifyPassword, createSession, revokeSession, hashPassword } from '@qa-platform/auth';
 import { invokeProc } from '@qa-platform/db';
 import { getEnv, loadEnv } from '@qa-platform/config';
 
 export interface LoginResult {
   success: boolean;
   error?: string;
+}
+
+// Lazily computed sentinel hash for timing-safe login responses
+let sentinelHashPromise: Promise<string> | null = null;
+function getSentinelHash(): Promise<string> {
+  if (!sentinelHashPromise) {
+    sentinelHashPromise = hashPassword('__timing_safe_sentinel__');
+  }
+  return sentinelHashPromise;
 }
 
 export async function login(
@@ -23,6 +32,8 @@ export async function login(
     });
 
     if (result.length === 0) {
+      // Perform a dummy verify to prevent timing-based login enumeration
+      await verifyPassword(password, await getSentinelHash());
       return { success: false, error: 'Invalid login or password' };
     }
 

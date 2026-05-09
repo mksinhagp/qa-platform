@@ -284,10 +284,10 @@ export async function decryptSecret(
   nonce: Buffer,
   wrappedDek: Buffer,
   wrapNonce: Buffer,
-  wrapNonceArg?: Buffer
+  aadOverride?: Buffer
 ): Promise<Buffer> {
   return withUnlocked(unlockToken, async (rvk) => {
-    const aadBuffer = wrapNonceArg ? wrapNonceArg : Buffer.from('qa-platform-secret-v1', 'utf8');
+    const aadBuffer = aadOverride ?? Buffer.from('qa-platform-secret-v1', 'utf8');
 
     // Unwrap DEK with RVK using wrap nonce
     const dek = await unwrapKey(wrappedDek, rvk, wrapNonce, aadBuffer);

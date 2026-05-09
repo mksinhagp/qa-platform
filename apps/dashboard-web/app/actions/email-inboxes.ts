@@ -1,7 +1,7 @@
 'use server';
 
 import { cookies } from 'next/headers';
-import { invokeProc } from '@qa-platform/db';
+import { invokeProc, invokeProcWrite } from '@qa-platform/db';
 import { requireCapability } from '@qa-platform/auth';
 import { encryptSecret } from '@qa-platform/vault';
 import { logAudit } from './audit';
@@ -80,21 +80,24 @@ export async function listEmailInboxes(
       o_provider: string;
       o_host: string;
       o_port: number;
+      o_use_tls: boolean;
       o_username: string;
       o_description: string | null;
       o_is_active: boolean;
+      o_created_date: string;
+      o_updated_date: string;
     }) => ({
       id: row.o_id,
       name: row.o_name,
       provider: row.o_provider,
       host: row.o_host,
       port: row.o_port,
-      use_tls: true,
+      use_tls: row.o_use_tls ?? true,
       username: row.o_username,
       description: row.o_description,
       is_active: row.o_is_active,
-      created_date: '',
-      updated_date: '',
+      created_date: row.o_created_date ?? '',
+      updated_date: row.o_updated_date ?? '',
     }));
 
     return { success: true, inboxes };
@@ -158,7 +161,7 @@ export async function createEmailInbox(
     );
 
     // Create secret record
-    const secretResult = await invokeProc('sp_secret_records_insert', {
+    const secretResult = await invokeProcWrite('sp_secret_records_insert', {
       i_category: 'email_password',
       i_owner_scope: 'global:email-inboxes',
       i_name: `${input.name} - Password`,
@@ -180,7 +183,7 @@ export async function createEmailInbox(
     const secretId = secretResult[0].o_id;
 
     // Create email inbox
-    const inboxResult = await invokeProc('sp_email_inboxes_insert', {
+    const inboxResult = await invokeProcWrite('sp_email_inboxes_insert', {
       i_name: input.name,
       i_provider: input.provider,
       i_host: input.host,
@@ -244,6 +247,9 @@ export async function updateEmailInbox(
     const secretId = inboxResult[0].o_secret_id;
 
     // If password provided, update secret
+    if (input.password && !unlockToken) {
+      return { success: false, error: 'Vault must be unlocked to update inbox password' };
+    }
     if (input.password && unlockToken) {
       const plaintext = Buffer.from(input.password, 'utf8');
       const { encryptedPayload, nonce, wrappedDek, wrapNonce } = await encryptSecret(
@@ -251,7 +257,7 @@ export async function updateEmailInbox(
         plaintext
       );
 
-      await invokeProc('sp_secret_records_update', {
+      await invokeProcWrite('sp_secret_records_update', {
         i_id: secretId,
         i_encrypted_payload: encryptedPayload,
         i_nonce: nonce,
@@ -263,14 +269,14 @@ export async function updateEmailInbox(
     }
 
     // Update email inbox
-    const result = await invokeProc('sp_email_inboxes_update', {
+    const result = await invokeProcWrite('sp_email_inboxes_update', {
       i_id: input.id,
-      i_name: input.name || null,
-      i_host: input.host || null,
-      i_port: input.port || null,
-      i_use_tls: input.use_tls !== undefined ? input.use_tls : null,
-      i_username: input.username || null,
-      i_description: input.description !== undefined ? (input.description || null) : null,
+      i_name: input.name ?? null,
+      i_host: input.host ?? null,
+      i_port: input.port ?? null,
+      i_use_tls: input.use_tls ?? null,
+      i_username: input.username ?? null,
+      i_description: input.description ?? null,
       i_is_active: input.is_active !== undefined ? input.is_active : null,
       i_updated_by: authContext.operatorId?.toString() || 'system',
     });

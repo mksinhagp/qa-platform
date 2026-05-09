@@ -310,6 +310,23 @@ export async function updateSiteEnvironment(data: {
   }
 }
 
+export async function deleteSiteEnvironment(id: number): Promise<{ success: boolean; error?: string }> {
+  try {
+    const authContext = await requireOperator();
+    const result = await invokeProcWrite('sp_site_environments_delete', {
+      i_id: id,
+      i_updated_by: authContext.operatorId.toString(),
+    });
+    if (!result.length || !result[0].o_deleted_id) {
+      return { success: false, error: 'Environment not found' };
+    }
+    return { success: true };
+  } catch (error) {
+    console.error('Delete site environment error:', error);
+    return { success: false, error: 'Failed to delete site environment' };
+  }
+}
+
 // ─── Credential Bindings ─────────────────────────────────────────────────────
 
 export async function listSiteCredentialBindings(

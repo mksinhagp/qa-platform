@@ -167,21 +167,18 @@ export async function getCredentialWithValue(
 
     const secretRow = secretResult[0];
 
-    // Decrypt secret value — pass wrap_nonce if present (new envelope format)
-    const plaintext = secretRow.o_wrap_nonce
-      ? await decryptSecret(
-          unlockToken,
-          secretRow.o_encrypted_payload,
-          secretRow.o_nonce,
-          secretRow.o_wrapped_dek,
-          secretRow.o_wrap_nonce,
-        )
-      : await decryptSecret(
-          unlockToken,
-          secretRow.o_encrypted_payload,
-          secretRow.o_nonce,
-          secretRow.o_wrapped_dek,
-        );
+    // Decrypt secret value — wrap_nonce is required for envelope decryption
+    if (!secretRow.o_wrap_nonce) {
+      return { success: false, error: 'Secret record is missing wrap_nonce (corrupt or pre-envelope format)' };
+    }
+
+    const plaintext = await decryptSecret(
+      unlockToken,
+      secretRow.o_encrypted_payload,
+      secretRow.o_nonce,
+      secretRow.o_wrapped_dek,
+      secretRow.o_wrap_nonce,
+    );
 
     const credentialValue = plaintext.toString('utf8');
 
@@ -313,6 +310,9 @@ export async function updateCredential(
     const secretId = credResult[0].o_secret_id;
 
     // If credential value provided, update secret
+    if (input.credential_value && !unlockToken) {
+      return { success: false, error: 'Vault must be unlocked to update credential secret value' };
+    }
     if (input.credential_value && unlockToken) {
       const plaintext = Buffer.from(input.credential_value, 'utf8');
       const { encryptedPayload, nonce, wrappedDek, wrapNonce } = await encryptSecret(

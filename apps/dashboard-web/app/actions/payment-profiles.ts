@@ -1,7 +1,7 @@
 'use server';
 
 import { cookies } from 'next/headers';
-import { invokeProc } from '@qa-platform/db';
+import { invokeProc, invokeProcWrite } from '@qa-platform/db';
 import { requireCapability } from '@qa-platform/auth';
 import { encryptSecret } from '@qa-platform/vault';
 import { logAudit } from './audit';
@@ -80,20 +80,24 @@ export async function listPaymentProfiles(
       o_payment_type: 'card' | 'ach';
       o_last_4: string | null;
       o_card_brand: string | null;
+      o_expiry_month: number | null;
+      o_expiry_year: number | null;
       o_description: string | null;
       o_is_active: boolean;
+      o_created_date: string;
+      o_updated_date: string;
     }) => ({
       id: row.o_id,
       name: row.o_name,
       payment_type: row.o_payment_type,
       last_4: row.o_last_4,
       card_brand: row.o_card_brand,
-      expiry_month: null,
-      expiry_year: null,
+      expiry_month: row.o_expiry_month ?? null,
+      expiry_year: row.o_expiry_year ?? null,
       description: row.o_description,
       is_active: row.o_is_active,
-      created_date: '',
-      updated_date: '',
+      created_date: row.o_created_date ?? '',
+      updated_date: row.o_updated_date ?? '',
     }));
 
     return { success: true, profiles };
@@ -170,7 +174,7 @@ export async function createPaymentProfile(
     );
 
     // Create secret record
-    const secretResult = await invokeProc('sp_secret_records_insert', {
+    const secretResult = await invokeProcWrite('sp_secret_records_insert', {
       i_category: 'payment_profile',
       i_owner_scope: 'global:payment-profiles',
       i_name: input.name,
@@ -192,7 +196,7 @@ export async function createPaymentProfile(
     const secretId = secretResult[0].o_id;
 
     // Create payment profile
-    const profileResult = await invokeProc('sp_payment_profiles_insert', {
+    const profileResult = await invokeProcWrite('sp_payment_profiles_insert', {
       i_name: input.name,
       i_payment_type: input.payment_type,
       i_last_4: input.last_4 || null,
@@ -214,10 +218,10 @@ export async function createPaymentProfile(
       name: row.o_name,
       payment_type: row.o_payment_type,
       last_4: row.o_last_4,
-      card_brand: null,
-      expiry_month: input.expiry_month || null,
-      expiry_year: input.expiry_year || null,
-      description: input.description || null,
+      card_brand: row.o_card_brand ?? null,
+      expiry_month: row.o_expiry_month ?? input.expiry_month ?? null,
+      expiry_year: row.o_expiry_year ?? input.expiry_year ?? null,
+      description: row.o_description ?? input.description ?? null,
       is_active: true,
       created_date: row.o_created_date,
       updated_date: row.o_created_date,
@@ -243,7 +247,7 @@ export async function updatePaymentProfile(
   try {
     const authContext = await requireCapability('site_credentials.manage');
 
-    const result = await invokeProc('sp_payment_profiles_update', {
+    const result = await invokeProcWrite('sp_payment_profiles_update', {
       i_id: input.id,
       i_name: input.name || null,
       i_last_4: input.last_4 || null,
@@ -265,12 +269,12 @@ export async function updatePaymentProfile(
       name: row.o_name,
       payment_type: row.o_payment_type,
       last_4: row.o_last_4,
-      card_brand: null,
-      expiry_month: input.expiry_month || null,
-      expiry_year: input.expiry_year || null,
-      description: input.description || null,
+      card_brand: row.o_card_brand ?? null,
+      expiry_month: row.o_expiry_month ?? input.expiry_month ?? null,
+      expiry_year: row.o_expiry_year ?? input.expiry_year ?? null,
+      description: row.o_description ?? input.description ?? null,
       is_active: row.o_is_active,
-      created_date: '',
+      created_date: row.o_created_date ?? '',
       updated_date: row.o_updated_date,
     };
 

@@ -1,6 +1,6 @@
 'use server';
 
-import { invokeProc } from '@qa-platform/db';
+import { invokeProc, invokeProcWrite } from '@qa-platform/db';
 import { hashPassword } from '@qa-platform/auth';
 import { requireCapability, requireOperator } from '@qa-platform/auth';
 
@@ -115,7 +115,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Operat
     // Hash the password
     const passwordHash = await hashPassword(input.password);
 
-    const result = await invokeProc('sp_operators_insert', {
+    const result = await invokeProcWrite('sp_operators_insert', {
       i_login: input.login,
       i_password_hash: passwordHash,
       i_full_name: input.full_name || null,
@@ -163,7 +163,7 @@ export async function updateOperator(input: UpdateOperatorInput): Promise<Operat
       passwordHash = await hashPassword(input.password);
     }
 
-    const result = await invokeProc('sp_operators_update', {
+    const result = await invokeProcWrite('sp_operators_update', {
       i_id: input.id,
       i_password_hash: passwordHash,
       i_full_name: input.full_name !== undefined ? (input.full_name || null) : null,
