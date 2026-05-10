@@ -111,12 +111,18 @@ importers:
       '@playwright/test':
         specifier: ^1.48.0
         version: 1.59.1
+      '@qa-platform/approvals':
+        specifier: workspace:*
+        version: link:../../packages/approvals
       '@qa-platform/personas':
         specifier: workspace:*
         version: link:../../packages/personas
       '@qa-platform/playwright-core':
         specifier: workspace:*
         version: link:../../packages/playwright-core
+      '@qa-platform/rules':
+        specifier: workspace:*
+        version: link:../../packages/rules
       '@qa-platform/shared-types':
         specifier: workspace:*
         version: link:../../packages/shared-types
@@ -135,6 +141,19 @@ importers:
         version: 4.21.0
       typescript:
         specifier: ^5
+        version: 5.9.3
+
+  packages/approvals:
+    dependencies:
+      '@qa-platform/db':
+        specifier: workspace:*
+        version: link:../db
+    devDependencies:
+      '@types/node':
+        specifier: ^20.10.0
+        version: 20.19.40
+      typescript:
+        specifier: ^5.3.3
         version: 5.9.3
 
   packages/auth:
@@ -234,6 +253,19 @@ importers:
       '@qa-platform/shared-types':
         specifier: workspace:*
         version: link:../shared-types
+    devDependencies:
+      '@types/node':
+        specifier: ^20.10.0
+        version: 20.19.40
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+
+  packages/rules:
+    dependencies:
+      zod:
+        specifier: ^3.22.4
+        version: 3.25.76
     devDependencies:
       '@types/node':
         specifier: ^20.10.0

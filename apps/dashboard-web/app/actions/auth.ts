@@ -35,12 +35,10 @@ export async function login(
   password: string
 ): Promise<LoginResult> {
   try {
-    console.log('Login attempt for:', login);
     // Get operator by login
     const result = await invokeProc('sp_operators_get_by_login', {
       i_login: login,
     });
-    console.log('Operator query result:', result.length, 'rows');
 
     if (result.length === 0) {
       // Perform a dummy verify to prevent timing-based login enumeration

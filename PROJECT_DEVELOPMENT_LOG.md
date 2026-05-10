@@ -2517,6 +2517,120 @@ Implemented in `packages/playwright-core/src/friction.ts` (see Task 2 above):
 
 ---
 
+## Phase 4 - Flow Templates, Approval Engine, Live Dashboard
+
+### Phase 4 Summary
+
+**Objective**: Implement real site flow templates, a full approval engine (pause-runner-for-decision), and live approval UI in the dashboard.
+
+#### Work Completed
+
+**DB Layer (7 stored procedures + 1 migration)**
+
+- `0082_sp_approvals_insert.sql` — Creates a pending approval record with timeout.
+- `0083_sp_approvals_update_decision.sql` — Records approved/rejected decision.
+- `0084_sp_approvals_get_by_id.sql` — Retrieves single approval (used by runner poll + dashboard).
+- `0085_sp_approvals_list.sql` — Lists approvals with filters (status, run_id, category); joins executions/runs for context.
+- `0086_sp_run_steps_insert.sql` — Inserts a run step record (validates callback token before write).
+- `0087_sp_run_executions_update_result.sql` — Records final execution result; upserts step rows and friction signals from JSONB arrays; validates callback token.
+- Updated `0071_sp_run_executions_insert.sql` — Added `i_callback_token` param to store the one-time runner token per execution.
+- Migration `0013_run_executions_callback_token.sql` — Adds `callback_token VARCHAR(255)` column + index to `run_executions`.
+
+**`packages/approvals` — Approval Engine**
+
+New package `@qa-platform/approvals` with:
+- `types.ts` — `ApprovalStrength`, `ApprovalStatus`, `ApprovalCategory`, `ApprovalRecord`, `DEFAULT_STRENGTHS`.
+- `engine.ts` — `requestApproval()`, `pollForDecision()`, `waitForDecision()` (polls with configurable interval/timeout), `decideApproval()`, `listApprovals()`, `getApprovalStrength()`.
+- `index.ts` — re-exports.
+
+**`packages/rules` — Site Business Rules**
+
+New package `@qa-platform/rules` with:
+- `schema.ts` — `SiteRulesSchema` (Zod): capacity, age restriction, coupon, payment, cancellation, registration flow, CSS selectors, elevated approval categories.
+- `loader.ts` — `loadSiteRules(siteId)`: dynamic import from `sites/<siteId>/rules.js`, validates against schema, in-memory cache, `clearRulesCache()` for tests.
+- `index.ts` — re-exports.
+
+**`sites/yugal-kunj/` — Site-Specific Rules & Flows**
+
+- `rules.ts` — `SiteRules` for `https://ykportalnextgenqa.yugalkunj.org`. Hash-SPA notes, camp-center selectors, payment/cancellation/registration policies.
+- `flows/browse.ts` — 6-step browse flow: navigate → wait for listing → verify non-empty → hover → click → accessibility check.
+- `flows/registration.ts` — 8-step registration flow with approval gate at `await_registration_approval` step (type=`approval`) before submit.
+- `flows/index.ts` — Exports `flows` map: `{ browse, registration }`.
+
+**Runner: Real Flow Dispatch + Approval Gate**
+
+Rewrote `apps/runner/src/execution-manager.ts`:
+- `loadFlows(siteId, baseUrl)` — Dynamically imports `sites/<siteId>/flows/index.js`, falls back to stub if not found. In-memory cache.
+- `waitForApproval(ex, stepName, stepOrder, correlationId)` — POSTs `approval_request` to dashboard callback URL, receives `approval_id`, then polls `GET /api/runner/approvals/:id/poll` every 3s until decided or 15-minute timeout.
+- `executeFlowWithApprovals(runner, flow, ex, correlationId)` — Step-by-step loop: skips remaining steps if approval rejected; calls `waitForApproval()` before `type=approval` steps; collects `StepResult[]`, friction score, final status.
+- Added `site_id` field to `ExecutionRequest` interface.
+
+**Dashboard API Routes**
+
+- `POST /api/runner/callback` — Handles two payload types:
+  - `execution_result`: validates token, calls `sp_run_executions_update_result`.
+  - `approval_request`: creates run_step + approval records via stored procs, returns `{ approval_id }`.
+- `GET /api/runner/approvals/:approvalId/poll` — Validates runner token, calls `sp_approvals_get_by_id`, auto-detects timeout expiry, returns `{ decided, status }`.
+
+**Dashboard Server Actions**
+
+`apps/dashboard-web/app/actions/approvals.ts`:
+- `listApprovals(options)` — Calls `sp_approvals_list`; maps to `ApprovalItem[]`.
+- `listPendingApprovals(run_id?)` — Convenience wrapper for `status=pending`.
+- `decideApproval(approvalId, decision, reason?)` — Calls `sp_approvals_update_decision`, requires `run.execute` capability.
+- `getApproval(approvalId)` — Single approval fetch.
+
+**Dashboard Live Approvals Page**
+
+Rewrote `apps/dashboard-web/app/dashboard/approvals/page.tsx` (client component):
+- Polls every 5s via `setInterval` + `listApprovals` server action.
+- Optimistic UI: approved/rejected cards disappear immediately, revert on failure.
+- `ApprovalCard` — Status badge, strength badge, live countdown timer (turns red at <2 min), context grid (run, flow, step, persona), Approve/Reject… buttons with optional reason input.
+- Filter tabs: Pending / All.
+- Manual refresh button with loading spinner.
+
+**Dashboard Run Detail — Pending Approvals Banner**
+
+Updated `apps/dashboard-web/app/dashboard/runs/[runId]/page.tsx`:
+- `listPendingApprovals(run_id)` fetched in parallel with run + executions on every poll cycle.
+- Amber banner with Bell icon appears when pending approvals exist for the run.
+- Each pending approval card shows step + flow context with inline Approve/Reject buttons.
+- "View all approvals" link navigates to `/dashboard/approvals`.
+
+#### Architecture Decisions
+
+1. **Approval gate is step-type based**: Steps with `type='approval'` trigger `waitForApproval()` before `fn()` executes. No changes needed to existing flow DSL semantics.
+2. **Callback URL for all runner→dashboard communication**: Both execution results and approval requests POST to the same callback URL (differentiated by `type` field). The runner token validates all calls without requiring a full auth session.
+3. **Runner polls dashboard for approval decisions**: Runner-initiated polling (not SSE push) keeps the runner stateless and simplifies failure recovery. 3s interval, 15-min timeout.
+4. **Optimistic UI for approval decisions**: Approval cards disappear immediately on click; reverted only if the server action fails. Prevents double-click issues.
+5. **Site flows loaded dynamically at runtime**: `loadFlows()` uses `await import()` with an in-memory cache. Runner docker image does not need to be rebuilt when site flows change if `BUSINESS_RULES_PATH` points to a mounted volume.
+
+#### Test Results
+
+**128/128 tests pass** (all 11 test files). Updated `execution-manager.test.ts` fixture to include `site_id` field.
+
+#### New Files
+
+- `db/migrations/0013_run_executions_callback_token.sql`
+- `db/procs/0082_sp_approvals_insert.sql` through `0087_sp_run_executions_update_result.sql`
+- `packages/approvals/package.json`, `tsconfig.json`, `src/types.ts`, `src/engine.ts`, `src/index.ts`
+- `packages/rules/package.json`, `tsconfig.json`, `src/schema.ts`, `src/loader.ts`, `src/index.ts`
+- `sites/yugal-kunj/rules.ts`, `flows/browse.ts`, `flows/registration.ts`, `flows/index.ts`
+- `apps/dashboard-web/app/actions/approvals.ts`
+- `apps/dashboard-web/app/api/runner/callback/route.ts`
+- `apps/dashboard-web/app/api/runner/approvals/[approvalId]/poll/route.ts`
+
+#### Modified Files
+
+- `apps/runner/src/execution-manager.ts` (full rewrite with real flow dispatch + approval gate)
+- `apps/runner/src/execution-manager.test.ts` (added `site_id` fixture field)
+- `apps/runner/package.json` (added `@qa-platform/approvals`, `@qa-platform/rules`)
+- `db/procs/0071_sp_run_executions_insert.sql` (added `i_callback_token`)
+- `apps/dashboard-web/app/dashboard/approvals/page.tsx` (full live UI implementation)
+- `apps/dashboard-web/app/dashboard/runs/[runId]/page.tsx` (pending approvals banner)
+
+---
+
 ## May 9, 2026 - Bug Fixes Completed
 
 ### Code Review and Bug Remediation

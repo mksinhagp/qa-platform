@@ -19,10 +19,7 @@ export default function LoginPage() {
     const loginValue = formData.get('login') as string;
     const password = formData.get('password') as string;
 
-    console.log('Submitting login for:', loginValue);
-
     const result = await login(loginValue, password);
-    console.log('Login result:', result);
 
     setLoading(false);
 

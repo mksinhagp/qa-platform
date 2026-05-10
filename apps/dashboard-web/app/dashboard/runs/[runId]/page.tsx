@@ -11,6 +11,7 @@ import {
   type RunDetail,
   type RunExecution,
 } from '@/app/actions/runs';
+import { listPendingApprovals, decideApproval, type ApprovalItem } from '@/app/actions/approvals';
 import { Button } from '@/components/ui/button';
 import {
   ArrowLeft,
@@ -21,6 +22,7 @@ import {
   StopCircle,
   Clock,
   SkipForward,
+  Bell,
 } from 'lucide-react';
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
@@ -138,16 +140,19 @@ export default function RunDetailPage({
 
   const [run, setRun] = useState<RunDetail | null>(null);
   const [executions, setExecutions] = useState<RunExecution[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState<ApprovalItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [approvalLoading, setApprovalLoading] = useState<number | null>(null);
 
   const loadData = useCallback(async () => {
     try {
-      const [runRes, execRes] = await Promise.all([
+      const [runRes, execRes, approvalRes] = await Promise.all([
         getRun(id),
         listRunExecutions(id),
+        listPendingApprovals(id),
       ]);
       if (runRes.success && runRes.run) {
         setRun(runRes.run);
@@ -156,6 +161,9 @@ export default function RunDetailPage({
       }
       if (execRes.success && execRes.executions) {
         setExecutions(execRes.executions);
+      }
+      if (approvalRes.success && approvalRes.approvals) {
+        setPendingApprovals(approvalRes.approvals);
       }
     } catch {
       setError('An error occurred while loading run');
@@ -195,6 +203,26 @@ export default function RunDetailPage({
       setActionError('An unexpected error occurred');
     } finally {
       setActionLoading(false);
+    }
+  }
+
+  async function handleApprovalDecision(approvalId: number, decision: 'approved' | 'rejected') {
+    const reason = decision === 'rejected'
+      ? window.prompt('Reason for rejection (optional)')?.trim() || undefined
+      : undefined;
+    setApprovalLoading(approvalId);
+    setActionError(null);
+    try {
+      const result = await decideApproval(approvalId, decision, reason);
+      if (!result.success) {
+        setActionError(result.error ?? `Failed to ${decision === 'approved' ? 'approve' : 'reject'} approval`);
+        return;
+      }
+      await loadData();
+    } catch {
+      setActionError('An unexpected error occurred while recording the approval decision');
+    } finally {
+      setApprovalLoading(null);
     }
   }
 
@@ -303,6 +331,61 @@ export default function RunDetailPage({
               <SummaryCard label="Failed" value={run.failed_executions} colorClass="text-red-600" />
               <SummaryCard label="Skipped" value={run.skipped_executions} colorClass="text-zinc-400" />
             </div>
+
+            {/* Pending approvals banner */}
+            {pendingApprovals.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <Bell className="w-4 h-4 text-amber-600" />
+                  <h2 className="text-sm font-semibold text-amber-800">
+                    {pendingApprovals.length} pending approval{pendingApprovals.length !== 1 ? 's' : ''} — run is paused
+                  </h2>
+                  <Link
+                    href="/dashboard/approvals"
+                    className="ml-auto text-xs text-amber-700 hover:underline font-medium"
+                  >
+                    View all approvals
+                  </Link>
+                </div>
+                <div className="space-y-2">
+                  {pendingApprovals.map(a => (
+                    <div key={a.id} className="flex items-center gap-3 bg-white rounded-md border border-amber-100 px-3 py-2">
+                      <span className="text-xs text-zinc-600 min-w-0 flex-1 truncate">
+                        <span className="font-medium text-zinc-900">{a.step_name}</span>
+                        {' '}in flow <span className="font-medium capitalize">{a.flow_name}</span>
+                        {a.payload_summary && (
+                          <span className="text-zinc-400 ml-1">· {a.payload_summary}</span>
+                        )}
+                      </span>
+                      <div className="flex gap-2 shrink-0">
+                        <Button
+                          size="sm"
+                          className="h-7 text-xs bg-green-600 hover:bg-green-700 text-white px-3"
+                          onClick={() => handleApprovalDecision(a.id, 'approved')}
+                          disabled={approvalLoading === a.id}
+                        >
+                          {approvalLoading === a.id ? (
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                          ) : (
+                            <CheckCircle className="w-3 h-3 mr-1" />
+                          )}
+                          Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs border-red-300 text-red-600 hover:bg-red-50 px-3"
+                          onClick={() => handleApprovalDecision(a.id, 'rejected')}
+                          disabled={approvalLoading === a.id}
+                        >
+                          <XCircle className="w-3 h-3 mr-1" /> Reject
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Executions table */}
             <div className="bg-white rounded-lg border border-zinc-200 overflow-hidden">

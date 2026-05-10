@@ -188,7 +188,7 @@ export async function createPaymentProfile(
       i_wrapped_dek: wrappedDek,
       i_kdf_version: 1,
       i_is_session_only: false,
-      i_created_by: authContext.operatorId?.toString() || 'system',
+      i_created_by: authContext.operatorId.toString(),
     });
 
     if (secretResult.length === 0) {
@@ -207,7 +207,7 @@ export async function createPaymentProfile(
       i_expiry_year: input.expiry_year || null,
       i_secret_id: secretId,
       i_description: input.description || null,
-      i_created_by: authContext.operatorId?.toString() || 'system',
+      i_created_by: authContext.operatorId.toString(),
     });
 
     if (profileResult.length === 0) {
@@ -258,7 +258,7 @@ export async function updatePaymentProfile(
       i_expiry_year: input.expiry_year || null,
       i_description: input.description || null,
       i_is_active: input.is_active !== undefined ? input.is_active : null,
-      i_updated_by: authContext.operatorId?.toString() || 'system',
+      i_updated_by: authContext.operatorId.toString(),
     });
 
     if (result.length === 0) {

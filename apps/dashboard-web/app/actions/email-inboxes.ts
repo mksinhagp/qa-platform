@@ -175,7 +175,7 @@ export async function createEmailInbox(
       i_wrapped_dek: wrappedDek,
       i_kdf_version: 1,
       i_is_session_only: false,
-      i_created_by: authContext.operatorId?.toString() || 'system',
+      i_created_by: authContext.operatorId.toString(),
     });
 
     if (secretResult.length === 0) {
@@ -194,7 +194,7 @@ export async function createEmailInbox(
       i_username: input.username,
       i_secret_id: secretId,
       i_description: input.description || null,
-      i_created_by: authContext.operatorId?.toString() || 'system',
+      i_created_by: authContext.operatorId.toString(),
     });
 
     if (inboxResult.length === 0) {
@@ -268,7 +268,7 @@ export async function updateEmailInbox(
         i_wrap_nonce: wrapNonce,
         i_aad: 'qa-platform-secret-v1',
         i_wrapped_dek: wrappedDek,
-        i_updated_by: authContext.operatorId?.toString() || 'system',
+        i_updated_by: authContext.operatorId.toString(),
       });
     }
 
@@ -282,7 +282,7 @@ export async function updateEmailInbox(
       i_username: input.username ?? null,
       i_description: input.description ?? null,
       i_is_active: input.is_active !== undefined ? input.is_active : null,
-      i_updated_by: authContext.operatorId?.toString() || 'system',
+      i_updated_by: authContext.operatorId.toString(),
     });
 
     if (result.length === 0) {

@@ -50,9 +50,29 @@ app.post('/run', async (req: Request, res: Response) => {
     return;
   }
 
+  // Validate each execution object has required fields
+  const executions = body.executions as Array<Record<string, unknown>>;
+  for (const ex of executions) {
+    if (
+      typeof ex.execution_id !== 'number' ||
+      typeof ex.site_id !== 'string' ||
+      typeof ex.base_url !== 'string' ||
+      typeof ex.callback_url !== 'string' ||
+      typeof ex.callback_token !== 'string' ||
+      typeof ex.flow_name !== 'string' ||
+      typeof ex.persona_id !== 'string' ||
+      typeof ex.browser !== 'string'
+    ) {
+      res.status(400).json({
+        error: 'Each execution must include execution_id, site_id, base_url, callback_url, callback_token, flow_name, persona_id, and browser',
+      });
+      return;
+    }
+  }
+
   const runRequest: RunRequest = {
     run_id: body.run_id,
-    executions: body.executions as RunRequest['executions'],
+    executions: executions as unknown as RunRequest['executions'],
   };
 
   let manager;

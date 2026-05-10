@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS vault_state (
     kdf_parallelism INTEGER NOT NULL DEFAULT 2,
     kdf_salt BYTEA NOT NULL,
     wrapped_rvk BYTEA, -- Wrapped root vault key
+    nonce BYTEA, -- Nonce used for RVK wrapping
     aad TEXT, -- Additional authenticated data (vault id)
     master_password_last_changed TIMESTAMP WITH TIME ZONE,
     created_date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,

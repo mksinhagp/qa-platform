@@ -32,7 +32,7 @@ export async function logAudit(params: LogAuditInput): Promise<void> {
     const authContext = await requireOperator();
     await invokeProc('sp_audit_logs_insert', {
       i_actor_type: 'operator',
-      i_actor_id: authContext.operatorId?.toString() || 'system',
+      i_actor_id: authContext.operatorId.toString(),
       i_action: params.action,
       i_target: params.target,
       i_status: params.status,

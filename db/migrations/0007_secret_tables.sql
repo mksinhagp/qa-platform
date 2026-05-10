@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS secret_records (
     nonce BYTEA NOT NULL,
     aad TEXT,
     wrapped_dek BYTEA NOT NULL,
+    wrap_nonce BYTEA,
     kdf_version VARCHAR(50) NOT NULL DEFAULT 'v1',
     is_session_only BOOLEAN NOT NULL DEFAULT FALSE,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,

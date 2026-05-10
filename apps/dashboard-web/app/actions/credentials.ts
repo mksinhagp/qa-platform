@@ -229,7 +229,7 @@ export async function createCredential(
       plaintext
     );
 
-    const createdBy = authContext.operatorId?.toString() || 'system';
+    const createdBy = authContext.operatorId.toString();
 
     // Both inserts must be atomic — use a single shared transaction
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -315,33 +315,38 @@ export async function updateCredential(
     if (input.credential_value && !unlockToken) {
       return { success: false, error: 'Vault must be unlocked to update credential secret value' };
     }
-    if (input.credential_value && unlockToken) {
-      const plaintext = Buffer.from(input.credential_value, 'utf8');
-      const { encryptedPayload, nonce, wrappedDek, wrapNonce } = await encryptSecret(
-        unlockToken,
-        plaintext
-      );
 
-      
+    const updatedBy = authContext.operatorId.toString();
 
-      await invokeProcWrite('sp_secret_records_update', {
-        i_id: secretId,
-        i_encrypted_payload: encryptedPayload,
-        i_nonce: nonce,
-        i_wrap_nonce: wrapNonce,
-        i_aad: 'qa-platform-secret-v1',
-        i_wrapped_dek: wrappedDek,
-        i_updated_by: authContext.operatorId?.toString() || 'system',
-      });
-    }
+    // Perform secret update + archive atomically in a single transaction
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await withTransaction(async ({ client }: { client: any }) => {
+      if (input.credential_value && unlockToken) {
+        const plaintext = Buffer.from(input.credential_value, 'utf8');
+        const { encryptedPayload, nonce, wrappedDek, wrapNonce } = await encryptSecret(
+          unlockToken,
+          plaintext
+        );
 
-    // Archive credential if is_active is false
-    if (input.is_active === false) {
-      await invokeProc('sp_secret_records_archive', {
-        i_id: secretId,
-        i_updated_by: authContext.operatorId?.toString() || 'system',
-      });
-    }
+        await invokeProcInTransaction(client, 'sp_secret_records_update', {
+          i_id: secretId,
+          i_encrypted_payload: encryptedPayload,
+          i_nonce: nonce,
+          i_wrap_nonce: wrapNonce,
+          i_aad: 'qa-platform-secret-v1',
+          i_wrapped_dek: wrappedDek,
+          i_updated_by: updatedBy,
+        });
+      }
+
+      // Archive credential if is_active is false
+      if (input.is_active === false) {
+        await invokeProcInTransaction(client, 'sp_secret_records_archive', {
+          i_id: secretId,
+          i_updated_by: updatedBy,
+        });
+      }
+    });
 
     // Log update
     await logAudit({

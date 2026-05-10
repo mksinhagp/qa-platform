@@ -121,7 +121,7 @@ export async function createOperator(input: CreateOperatorInput): Promise<Operat
       i_full_name: input.full_name || null,
       i_email: input.email || null,
       i_active: input.active ?? true,
-      i_created_by: authContext.operatorId?.toString() || 'system',
+      i_created_by: authContext.operatorId.toString(),
     });
 
     if (result.length === 0) {
@@ -169,7 +169,7 @@ export async function updateOperator(input: UpdateOperatorInput): Promise<Operat
       i_full_name: input.full_name !== undefined ? (input.full_name || null) : null,
       i_email: input.email !== undefined ? (input.email || null) : null,
       i_active: input.active !== undefined ? input.active : null,
-      i_updated_by: authContext.operatorId?.toString() || 'system',
+      i_updated_by: authContext.operatorId.toString(),
     });
 
     if (result.length === 0) {

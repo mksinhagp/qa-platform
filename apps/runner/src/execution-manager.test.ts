@@ -16,6 +16,7 @@ const RUN_REQUEST: RunRequest = {
       persona_id: 'confident_desktop',
       browser: 'chromium',
       flow_name: 'registration',
+      site_id: 'test-site',
       base_url: 'https://example.test',
       callback_token: 'token',
       callback_url: 'http://dashboard/callback',
