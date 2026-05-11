@@ -142,12 +142,17 @@ async function loadFlows(siteId: string, baseUrl: string): Promise<Record<string
 /**
  * Post an approval request to the dashboard and poll for an operator decision.
  * Returns true if approved, false if rejected or timed out.
+ *
+ * @param approvalCategory - The category to record on the approval row (e.g.
+ *   'registration_submit' or 'checkout_submit'). Derived from the step's
+ *   `approval_category` field; falls back to 'registration_submit'.
  */
 async function waitForApproval(
   ex: ExecutionRequest,
   stepName: string,
   stepOrder: number,
   correlationId: string,
+  approvalCategory = 'registration_submit',
 ): Promise<boolean> {
   // POST approval_request to the dashboard callback
   const approvalPayload = {
@@ -156,7 +161,7 @@ async function waitForApproval(
     run_id: ex.run_id,
     step_name: stepName,
     step_order: stepOrder,
-    category: 'registration_submit',
+    category: approvalCategory,
     payload_summary: `Flow "${ex.flow_name}" — step "${stepName}" requires operator approval before executing`,
     timeout_ms: APPROVAL_DEFAULT_TIMEOUT_MS,
   };
@@ -192,12 +197,12 @@ async function waitForApproval(
     return false;
   }
 
-  // Poll the dashboard approval poll endpoint until a decision or timeout
+  // Poll the dashboard approval poll endpoint until a decision or timeout.
+  // Poll first, then sleep — avoids an unnecessary initial delay before the
+  // first check, which matters when an operator acts immediately.
   const deadline = Date.now() + APPROVAL_DEFAULT_TIMEOUT_MS;
 
   while (Date.now() < deadline) {
-    await sleep(APPROVAL_POLL_INTERVAL_MS);
-
     try {
       const pollUrl = new URL(ex.callback_url);
       // Callback URL may be the execution result endpoint; derive the approval poll endpoint
@@ -214,21 +219,27 @@ async function waitForApproval(
 
       if (!pollResp.ok) {
         logger.warn(`Approval poll returned ${pollResp.status}`, undefined, correlationId);
-        continue;
-      }
+      } else {
+        const poll = await pollResp.json() as { decided: boolean; status?: string };
 
-      const poll = await pollResp.json() as { decided: boolean; status?: string };
-
-      if (poll.decided) {
-        logger.info(
-          `Approval ${approvalId} decided: ${poll.status}`,
-          { execution_id: ex.execution_id },
-          correlationId,
-        );
-        return poll.status === 'approved';
+        if (poll.decided) {
+          logger.info(
+            `Approval ${approvalId} decided: ${poll.status}`,
+            { execution_id: ex.execution_id },
+            correlationId,
+          );
+          return poll.status === 'approved';
+        }
       }
     } catch (err) {
       logger.warn(`Approval poll error: ${String(err)}`, undefined, correlationId);
+    }
+
+    // Only sleep if there is still time remaining so we exit promptly on timeout.
+    if (Date.now() + APPROVAL_POLL_INTERVAL_MS < deadline) {
+      await sleep(APPROVAL_POLL_INTERVAL_MS);
+    } else {
+      break;
     }
   }
 
@@ -281,7 +292,13 @@ async function executeFlowWithApprovals(
         correlationId,
       );
 
-      const approved = await waitForApproval(ex, step.name, i + 1, correlationId);
+      const approved = await waitForApproval(
+        ex,
+        step.name,
+        i + 1,
+        correlationId,
+        step.approval_category ?? 'registration_submit',
+      );
 
       if (!approved) {
         approvalRejected = true;

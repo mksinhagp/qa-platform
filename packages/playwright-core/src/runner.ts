@@ -46,7 +46,17 @@ export type FlowStep = (runner: PersonaRunner) => Promise<void>;
 export interface FlowDefinition {
   id: string;
   name: string;
-  steps: { name: string; type: string; fn: FlowStep }[];
+  steps: {
+    name: string;
+    type: string;
+    fn: FlowStep;
+    /**
+     * Approval category for steps with type='approval'.
+     * Passed to the dashboard when requesting operator approval.
+     * Defaults to 'registration_submit' if not specified.
+     */
+    approval_category?: string;
+  }[];
 }
 
 export class PersonaRunner {

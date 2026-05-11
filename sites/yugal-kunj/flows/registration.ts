@@ -181,13 +181,15 @@ export const registrationFlow: FlowDefinition = {
     {
       name: 'await_registration_approval',
       type: 'approval',
+      approval_category: 'registration_submit',
       fn: async (runner: PersonaRunner) => {
-        // This step is intercepted by the ExecutionManager before fn() is called
-        // when it detects step_type === 'approval'. The runner pauses here,
-        // posts an approval request to the dashboard, and waits for operator decision.
-        // If approved: fn() is called (submit). If rejected: step is skipped.
+        // The ExecutionManager intercepts steps with type='approval': it posts an
+        // approval request to the dashboard and waits for an operator decision
+        // BEFORE calling fn(). If approved, fn() runs (this brief hesitate).
+        // If rejected or timed out, fn() is NOT called and the step is recorded as
+        // skipped_by_approval. The actual form submit is the next step (submit_registration).
         runner.collector.setStep('await_registration_approval');
-        await runner.hesitate(100); // brief pause before submission
+        await runner.hesitate(100); // brief pause between approval and submit
       },
     },
 

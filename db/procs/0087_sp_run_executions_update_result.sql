@@ -55,7 +55,9 @@ BEGIN
         updated_by     = i_updated_by
     WHERE id = i_id;
 
-    -- Upsert step records (insert if step_name not yet present)
+    -- Upsert step records. If a row already exists for this step (e.g. an approval
+    -- step pre-inserted by sp_run_steps_insert), update it to the final status
+    -- so that approval steps do not remain stuck at 'awaiting_approval' forever.
     IF i_steps IS NOT NULL THEN
         FOR v_step IN SELECT * FROM jsonb_array_elements(i_steps)
         LOOP
@@ -83,7 +85,11 @@ BEGIN
                 i_updated_by,
                 i_updated_by
             )
-            ON CONFLICT DO NOTHING;
+            ON CONFLICT (run_execution_id, step_name) DO UPDATE
+                SET status        = EXCLUDED.status,
+                    error_message = EXCLUDED.error_message,
+                    updated_date  = CURRENT_TIMESTAMP,
+                    updated_by    = i_updated_by;
         END LOOP;
     END IF;
 

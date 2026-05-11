@@ -96,10 +96,17 @@ export async function waitForDecision(
 ): Promise<PollResult> {
   const deadline = Date.now() + timeoutMs;
 
+  // Poll first, then sleep — avoids an unnecessary initial delay before the
+  // first check, which matters when an operator acts immediately.
   while (Date.now() < deadline) {
     const result = await pollForDecision(approvalId);
     if (result.decided) return result;
-    await sleep(intervalMs);
+    // Only sleep if there is still time remaining so we exit promptly on timeout.
+    if (Date.now() + intervalMs < deadline) {
+      await sleep(intervalMs);
+    } else {
+      break;
+    }
   }
 
   // Deadline passed — mark timed out and return

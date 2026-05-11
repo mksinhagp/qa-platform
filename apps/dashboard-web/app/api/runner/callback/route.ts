@@ -15,7 +15,31 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { invokeProcWrite } from '@qa-platform/db';
+import { invokeProc, invokeProcWrite } from '@qa-platform/db';
+
+// Hardcoded fallback strengths — mirrors packages/approvals/src/types.ts DEFAULT_STRENGTHS
+const DEFAULT_STRENGTHS: Record<string, string> = {
+  registration_submit: 'one_click',
+  checkout_submit: 'strong_confirm',
+  data_export: 'strong_confirm',
+  account_delete: 'strong_confirm',
+};
+
+/**
+ * Look up the required approval strength for a given category from the DB policy
+ * table, falling back to DEFAULT_STRENGTHS then 'one_click' if unavailable.
+ */
+async function getApprovalStrength(category: string): Promise<string> {
+  try {
+    const rows = await invokeProc('sp_approval_policies_list', { i_is_system: null });
+    type PolicyRow = { o_action_category: string; o_default_strength: string };
+    const match = (rows as PolicyRow[]).find(r => r.o_action_category === category);
+    if (match) return match.o_default_strength;
+  } catch {
+    // DB policy lookup failed — fall back to hardcoded defaults
+  }
+  return DEFAULT_STRENGTHS[category] ?? 'one_click';
+}
 
 export async function POST(request: NextRequest) {
   const token = request.headers.get('x-runner-token');
@@ -108,7 +132,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Failed to create run step' }, { status: 500 });
       }
 
-      // Then create the approval record
+      // Then create the approval record — look up the correct required strength
+      // from the policy table so checkout_submit gets strong_confirm, not one_click.
+      const requiredStrength = await getApprovalStrength(category);
       const timeoutAt = new Date(Date.now() + timeoutMs).toISOString();
       const approvalResult = await invokeProcWrite('sp_approvals_insert', {
         i_run_step_id: runStepId,
@@ -116,7 +142,7 @@ export async function POST(request: NextRequest) {
         i_target_type: 'flow_step',
         i_target_id: `execution_${executionId}_step_${stepOrder}`,
         i_payload_summary: payloadSummary ?? null,
-        i_required_strength: 'one_click',
+        i_required_strength: requiredStrength,
         i_timeout_at: timeoutAt,
         i_created_by: 'runner',
       });

@@ -218,6 +218,7 @@ export const checkoutFlow: FlowDefinition = {
     {
       name: 'await_checkout_approval',
       type: 'approval',
+      approval_category: 'checkout_submit',
       fn: async (runner: PersonaRunner) => {
         // Strong approval gate — operator must type a reason before the payment submits.
         // The ExecutionManager intercepts this step type and posts an approvals row

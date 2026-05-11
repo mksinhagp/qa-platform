@@ -10,7 +10,17 @@
 import path from 'node:path';
 import { SiteRulesSchema, type SiteRules } from './schema.js';
 
-const cache = new Map<string, SiteRules>();
+// In development mode, cache entries expire after 30 seconds so that editing
+// a site's rules.ts is reflected without a full process restart.
+// In production, rules are cached indefinitely for the process lifetime.
+const CACHE_TTL_MS = process.env.NODE_ENV === 'production' ? Infinity : 30_000;
+
+interface CacheEntry {
+  rules: SiteRules;
+  expiresAt: number;
+}
+
+const cache = new Map<string, CacheEntry>();
 
 // Validate siteId to prevent path traversal — only allow alphanumeric, hyphens, underscores
 function validateSiteId(siteId: string): void {
@@ -30,7 +40,7 @@ export async function loadSiteRules(
 ): Promise<SiteRules> {
   validateSiteId(siteId);
   const cached = cache.get(siteId);
-  if (cached) return cached;
+  if (cached && Date.now() < cached.expiresAt) return cached.rules;
 
   const resolvedRoot = path.resolve(sitesRoot);
   const rulesPath = path.resolve(sitesRoot, siteId, 'rules.js');
@@ -59,7 +69,7 @@ export async function loadSiteRules(
     );
   }
 
-  cache.set(siteId, parsed.data);
+  cache.set(siteId, { rules: parsed.data, expiresAt: Date.now() + CACHE_TTL_MS });
   return parsed.data;
 }
 

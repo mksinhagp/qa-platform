@@ -125,6 +125,23 @@ app.post('/abort', (req: Request, res: Response) => {
     return;
   }
 
+  // Validate that the caller is targeting the run that is actually in progress.
+  // Prevents a race where Run A completes and Run B starts between the dashboard
+  // reading the active run id and posting the abort.
+  const body = req.body as { run_id?: number };
+  if (body.run_id !== undefined && body.run_id !== manager.getRunId()) {
+    logger.warn(
+      `Abort run_id mismatch: requested ${body.run_id}, active ${manager.getRunId()}`,
+      undefined,
+      correlationId,
+    );
+    res.status(409).json({
+      error: `Cannot abort: requested run_id ${body.run_id} does not match active run_id ${manager.getRunId()}`,
+      active_run_id: manager.getRunId(),
+    });
+    return;
+  }
+
   logger.info(`Abort requested for run ${manager.getRunId()}`, undefined, correlationId);
   manager.abort();
   res.status(200).json({ message: 'Abort signal sent', run_id: manager.getRunId() });

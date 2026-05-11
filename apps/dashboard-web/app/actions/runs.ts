@@ -399,6 +399,19 @@ export async function createRun(data: z.infer<typeof createRunSchema>): Promise<
     if (!runnerResponse.ok) {
       const errorText = await runnerResponse.text();
       console.error('Runner service error:', errorText);
+      // Mark the run as failed so it doesn't stay stuck in 'draft' with orphaned
+      // execution rows. Best-effort — if this also fails we still return an error.
+      try {
+        await invokeProcWrite('sp_runs_update_status', {
+          i_id: runId,
+          i_status: 'failed',
+          i_started_at: null,
+          i_completed_at: new Date().toISOString(),
+          i_updated_by: authContext.operatorId.toString(),
+        });
+      } catch (statusErr) {
+        console.error('Failed to mark run as failed after runner rejection:', statusErr);
+      }
       throw new Error(`Runner service returned ${runnerResponse.status}: ${errorText}`);
     }
 
@@ -445,6 +458,8 @@ export async function abortRun(id: number): Promise<{ success: boolean; error?: 
       headers: {
         'Content-Type': 'application/json',
       },
+      // Send the run_id so the runner can confirm it is aborting the correct run.
+      body: JSON.stringify({ run_id: id }),
     });
 
     if (!runnerResponse.ok && runnerResponse.status !== 404) {
