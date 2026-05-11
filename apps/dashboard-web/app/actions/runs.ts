@@ -4,6 +4,8 @@ import { invokeProc, invokeProcWrite } from '@qa-platform/db';
 import { requireCapability } from '@qa-platform/auth';
 import { getEnv, loadEnv } from '@qa-platform/config';
 import { z } from 'zod';
+import { randomBytes } from 'crypto';
+import { getSite } from './sites';
 
 // ─── Validation Schemas ──────────────────────────────────────────────────────
 
@@ -329,6 +331,76 @@ export async function createRun(data: z.infer<typeof createRunSchema>): Promise<
 
     const runId: number = result[0]?.o_id;
     if (!runId) throw new Error('Run creation returned no ID');
+
+    // Get site details for base URL
+    const siteResult = await getSite(d.site_id);
+    if (!siteResult.success || !siteResult.site) {
+      throw new Error('Failed to get site details');
+    }
+
+    // Materialize executions (cartesian product: personas x browsers x flows x device_profiles x network_profiles)
+    const executions: Array<{ execution_id: number; site_id: string; base_url: string; callback_url: string; callback_token: string; flow_name: string; persona_id: string; browser: string }> = [];
+    
+    for (const personaId of d.persona_ids) {
+      for (const browser of d.browsers) {
+        for (const flowName of d.flow_names) {
+          for (const deviceProfileId of d.device_profile_ids) {
+            for (const networkProfileId of d.network_profile_ids) {
+              const callbackToken = randomBytes(32).toString('base64url');
+              const callbackUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/runner/callback`;
+              
+              const execResult = await invokeProcWrite('sp_run_executions_insert', {
+                i_run_id: runId,
+                i_persona_id: personaId,
+                i_device_profile_id: deviceProfileId,
+                i_network_profile_id: networkProfileId,
+                i_browser: browser,
+                i_flow_name: flowName,
+                i_callback_token: callbackToken,
+                i_created_by: authContext.operatorId.toString(),
+              });
+              
+              const executionId = execResult[0]?.o_id;
+              if (!executionId) throw new Error('Execution creation returned no ID');
+              
+              executions.push({
+                execution_id: executionId,
+                site_id: d.site_id.toString(),
+                base_url: siteResult.site.base_url,
+                callback_url: callbackUrl,
+                callback_token: callbackToken,
+                flow_name: flowName,
+                persona_id: personaId,
+                browser: browser,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    // Call runner service to execute the run
+    // Read RUNNER_API_BASE_URL directly from process.env to avoid stale cached
+    // defaults (the Zod schema defaults to the Docker hostname "runner").
+    const runnerBaseUrl = process.env.RUNNER_API_BASE_URL || 'http://localhost:4000';
+    console.log('Runner base URL:', runnerBaseUrl);
+
+    const runnerResponse = await fetch(`${runnerBaseUrl}/run`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        run_id: runId,
+        executions: executions,
+      }),
+    });
+
+    if (!runnerResponse.ok) {
+      const errorText = await runnerResponse.text();
+      console.error('Runner service error:', errorText);
+      throw new Error(`Runner service returned ${runnerResponse.status}: ${errorText}`);
+    }
 
     return { success: true, runId };
   } catch (error) {

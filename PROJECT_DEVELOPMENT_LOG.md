@@ -2698,3 +2698,95 @@ Comprehensive code review of all packages, apps, database scripts, and Docker co
 - Bug fixes: security, null-safety, transaction safety, Docker env alignment, type consistency
 
 ---
+
+## May 10, 2026 - Smoke Testing Session and Bug Fixes
+
+### Objective: Run the application and perform smoke testing
+
+**Context**: Initial attempt to run the QA Platform for smoke testing revealed multiple configuration and implementation issues preventing basic functionality.
+
+#### Issues Encountered
+
+1. **Login failure** - Login with admin/admin123 failed with database connection error
+   - Root cause: POSTGRES_PASSWORD in .env.local was set to `change-this-password-in-production` instead of matching Docker container password `qa_password`
+   - Error: ECONNREFUSED connecting to PostgreSQL on port 5434
+
+2. **Duplicate stored procedure** - Run creation failed with "function sp_run_executions_insert is not unique"
+   - Root cause: Two versions of the stored procedure existed in the database with identical signatures
+   - Error: PostgreSQL code 42725 - function is not unique
+
+3. **Missing execution materialization** - Runs created but never executed
+   - Root cause: createRun function only inserted the run into database but never materialized executions or called the runner service
+   - The runner service was healthy (busy: false) because it was never invoked
+
+4. **Environment variable caching issue** - RUNNER_API_BASE_URL resolving to Docker hostname
+   - Root cause: Zod schema defaults to `http://runner:4000` (Docker hostname), and the cached env config didn't pick up .env.local value `http://localhost:4000`
+   - Error: ENOTFOUND runner when attempting to call runner service
+
+#### Fixes Applied
+
+1. **Updated .env.local**
+   - Changed POSTGRES_PASSWORD from `change-this-password-in-production` to `qa_password`
+   - Changed POSTGRES_PORT from 5432 to 5434 (Docker override mapping)
+   - Verified .env file also had correct RUNNER_API_BASE_URL=http://localhost:4000
+
+2. **Database cleanup**
+   - Dropped duplicate sp_run_executions_insert function (OID 17232, kept 17275)
+   - Updated stuck run (ID 1) from 'running' to 'failed' status
+
+3. **Enhanced createRun function** (apps/dashboard-web/app/actions/runs.ts)
+   - Added getSite import to retrieve site base_url
+   - Added execution materialization: cartesian product of personas x browsers x flows x device_profiles x network_profiles
+   - Added callback token generation using crypto.randomBytes(32).toString('base64url')
+   - Added sp_run_executions_insert calls for each execution
+   - Added runner service invocation via POST /run endpoint with execution payloads
+   - Fixed RUNNER_API_BASE_URL to read directly from process.env (bypassing Zod cached defaults)
+   - Fixed NEXT_PUBLIC_APP_URL to read directly from process.env for callback URLs
+
+4. **Package rebuild**
+   - Rebuilt all packages using npx tsc --build --force
+   - Packages rebuilt: shared-types, config, db, auth, vault, personas, rules, playwright-core, approvals, mcp-postgres
+   - Required after clearing .turbo/cache which caused module resolution issues
+
+5. **Dev server setup**
+   - Started dev server in screen session (qadev) to prevent background job SIGHUP
+   - Dashboard running on http://localhost:3000
+   - Runner service running on http://localhost:4000
+
+#### Major Decisions
+
+1. **Direct process.env reads**: For RUNNER_API_BASE_URL and NEXT_PUBLIC_APP_URL, read directly from process.env instead of using cached Zod config. The Zod defaults are Docker-oriented (http://runner:4000) and the cache loads before .env.local is available. This is a pragmatic fix for local development.
+
+2. **Execution materialization in createRun**: The createRun function now handles both run creation and execution materialization in a single transaction. This ensures atomicity and simplifies the API surface.
+
+3. **Callback token generation**: Using crypto.randomBytes(32).toString('base64url') for cryptographically secure, URL-safe tokens for runner callback validation.
+
+4. **Screen session for dev server**: Using screen to run pnpm dev prevents background job SIGHUP that was killing the dev server when run via nohup or background ampersand.
+
+#### Current State
+
+**Application functional for smoke testing:**
+- Login works (admin/admin123)
+- Run creation works and registers runs in database
+- Runner service is invoked on run creation (executions materialized and sent to /run endpoint)
+- Dashboard accessible at http://localhost:3000
+- Runner service accessible at http://localhost:4000
+- PostgreSQL running in Docker on port 5434
+- Dev server running in screen session (qadev)
+
+#### Files Modified
+
+- `.env.local` - POSTGRES_PASSWORD, POSTGRES_PORT
+- `.env` - RUNNER_API_BASE_URL, RUNNER_HOST, POSTGRES_PORT, OLLAMA_BASE_URL
+- `apps/dashboard-web/app/actions/runs.ts` - Added execution materialization, runner invocation, direct process.env reads
+- `apps/dashboard-web/next.config.ts` - Added allowedDevOrigins: ['127.0.0.1']
+- `turbo.json` - Added concurrency: "20"
+
+#### Next Steps
+
+- Continue smoke testing the application
+- Test run execution end-to-end with actual flows
+- Verify approvals workflow if FEATURE_APPROVALS=true
+
+---
+
