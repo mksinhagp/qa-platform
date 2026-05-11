@@ -24,6 +24,12 @@ import {
   type ApiTestSuiteRecord,
   type ApiTestAssertionRecord,
 } from '@/app/actions/apiTestResults';
+import {
+  listAdminTestSuites,
+  listAdminTestAssertions,
+  type AdminTestSuiteRecord,
+  type AdminTestAssertionRecord,
+} from '@/app/actions/adminTestResults';
 import { Button } from '@/components/ui/button';
 import {
   ArrowLeft,
@@ -40,6 +46,7 @@ import {
   ChevronRight,
   Link2,
   Zap,
+  Shield,
 } from 'lucide-react';
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
@@ -175,6 +182,15 @@ export default function RunDetailPage({
   useEffect(() => {
     expandedApiSuiteRef.current = expandedApiSuite;
   }, [expandedApiSuite]);
+  // Phase 7: Admin test suite results
+  const [adminTestSuites, setAdminTestSuites] = useState<AdminTestSuiteRecord[]>([]);
+  const [adminTestAssertions, setAdminTestAssertions] = useState<Record<number, AdminTestAssertionRecord[]>>({});
+  const [expandedAdminSuite, setExpandedAdminSuite] = useState<number | null>(null);
+  const fetchingAdminAssertions = useRef<Set<number>>(new Set());
+  const expandedAdminSuiteRef = useRef<number | null>(null);
+  useEffect(() => {
+    expandedAdminSuiteRef.current = expandedAdminSuite;
+  }, [expandedAdminSuite]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -249,6 +265,38 @@ export default function RunDetailPage({
           fetchingApiAssertions.current.delete(currentExpanded);
         });
       }
+
+      // Phase 7: Load admin test suites for all executions with admin flows
+      const adminFlows = ['admin-login', 'booking-lookup', 'registration-lookup', 'admin-edit', 'reporting-screens'];
+      const adminExecs = loadedExecs.filter(e => adminFlows.includes(e.flow_name));
+      if (adminExecs.length > 0) {
+        const allAdminSuites: AdminTestSuiteRecord[] = [];
+        await Promise.all(
+          adminExecs.map(async exec => {
+            const suiteRes = await listAdminTestSuites(exec.id);
+            if (suiteRes.success && suiteRes.suites) {
+              allAdminSuites.push(...suiteRes.suites);
+            }
+          }),
+        );
+        setAdminTestSuites(allAdminSuites);
+        const currentAdminExpanded = expandedAdminSuiteRef.current;
+        setAdminTestAssertions(prev => {
+          if (currentAdminExpanded == null) return {};
+          const kept = prev[currentAdminExpanded];
+          return kept ? { [currentAdminExpanded]: kept } : {};
+        });
+        if (currentAdminExpanded != null && !fetchingAdminAssertions.current.has(currentAdminExpanded)) {
+          fetchingAdminAssertions.current.add(currentAdminExpanded);
+          listAdminTestAssertions(currentAdminExpanded).then(res => {
+            if (res.success && res.assertions) {
+              setAdminTestAssertions(p => ({ ...p, [currentAdminExpanded]: res.assertions! }));
+            }
+          }).finally(() => {
+            fetchingAdminAssertions.current.delete(currentAdminExpanded);
+          });
+        }
+      }
     } catch {
       setError('An error occurred while loading run');
     } finally {
@@ -304,6 +352,25 @@ export default function RunDetailPage({
         }
       } finally {
         fetchingApiAssertions.current.delete(suiteId);
+      }
+    }
+  }
+
+  async function handleExpandAdminSuite(suiteId: number) {
+    if (expandedAdminSuite === suiteId) {
+      setExpandedAdminSuite(null);
+      return;
+    }
+    setExpandedAdminSuite(suiteId);
+    if (!adminTestAssertions[suiteId] && !fetchingAdminAssertions.current.has(suiteId)) {
+      fetchingAdminAssertions.current.add(suiteId);
+      try {
+        const res = await listAdminTestAssertions(suiteId);
+        if (res.success && res.assertions) {
+          setAdminTestAssertions(prev => ({ ...prev, [suiteId]: res.assertions! }));
+        }
+      } finally {
+        fetchingAdminAssertions.current.delete(suiteId);
       }
     }
   }
@@ -683,6 +750,103 @@ export default function RunDetailPage({
                                       {a.response_time_ms}ms
                                     </span>
                                   )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Phase 7: Admin Test Results panel */}
+            {adminTestSuites.length > 0 && (
+              <div className="bg-white rounded-lg border border-zinc-200 overflow-hidden">
+                <div className="px-4 py-3 border-b border-zinc-200 bg-zinc-50 flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-zinc-500" />
+                  <h2 className="text-sm font-semibold text-zinc-700">
+                    Admin Tests ({adminTestSuites.length} suite{adminTestSuites.length !== 1 ? 's' : ''})
+                  </h2>
+                  <div className="ml-auto flex items-center gap-3 text-xs">
+                    <span className="text-green-700">
+                      {adminTestSuites.reduce((s, t) => s + t.passed_assertions, 0)} passed
+                    </span>
+                    <span className="text-red-700">
+                      {adminTestSuites.reduce((s, t) => s + t.failed_assertions, 0)} failed
+                    </span>
+                    <span className="text-zinc-400">
+                      {adminTestSuites.reduce((s, t) => s + t.skipped_assertions, 0)} skipped
+                    </span>
+                  </div>
+                </div>
+                <div className="divide-y divide-zinc-100">
+                  {adminTestSuites.map(suite => {
+                    const isExpanded = expandedAdminSuite === suite.id;
+                    const assertions = adminTestAssertions[suite.id] ?? [];
+                    const suiteStatusColor =
+                      suite.status === 'passed' ? 'text-green-700 bg-green-50' :
+                      suite.status === 'failed' ? 'text-red-700 bg-red-50' :
+                      suite.status === 'error' ? 'text-red-700 bg-red-50' :
+                      suite.status === 'skipped' ? 'text-zinc-500 bg-zinc-100' :
+                      'text-blue-700 bg-blue-50';
+                    const suiteLabel = suite.suite_type
+                      .replace(/_/g, ' ')
+                      .replace(/\b\w/g, c => c.toUpperCase());
+
+                    return (
+                      <div key={suite.id}>
+                        <button
+                          onClick={() => handleExpandAdminSuite(suite.id)}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-zinc-50 transition-colors"
+                        >
+                          {isExpanded ? <ChevronDown className="w-4 h-4 text-zinc-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-zinc-400 shrink-0" />}
+                          <Shield className="w-4 h-4 text-violet-500 shrink-0" />
+                          <span className="flex-1 text-xs font-medium text-zinc-900">{suiteLabel}</span>
+                          <span className="text-xs text-zinc-500 mr-2">
+                            {suite.passed_assertions}/{suite.total_assertions} passed
+                          </span>
+                          <span className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full ${suiteStatusColor}`}>
+                            {suite.status}
+                          </span>
+                          {suite.duration_ms !== null && (
+                            <span className="text-xs text-zinc-400 shrink-0 ml-2">
+                              {suite.duration_ms < 1000
+                                ? `${suite.duration_ms}ms`
+                                : `${(suite.duration_ms / 1000).toFixed(1)}s`}
+                            </span>
+                          )}
+                        </button>
+                        {isExpanded && (
+                          <div className="px-10 pb-3 space-y-1">
+                            {suite.error_message && (
+                              <p className="text-xs text-red-600 mb-2">{suite.error_message}</p>
+                            )}
+                            {assertions.length === 0 && (
+                              <p className="text-xs text-zinc-400">No assertion results yet.</p>
+                            )}
+                            {assertions.map(a => {
+                              const aColor =
+                                a.status === 'passed' ? 'text-green-700' :
+                                a.status === 'failed' ? 'text-red-700' :
+                                a.status === 'skipped' ? 'text-zinc-400' :
+                                'text-amber-700';
+                              return (
+                                <div key={a.id} className="flex items-start gap-2 text-xs">
+                                  <span className={`font-mono shrink-0 w-3 mt-0.5 ${aColor}`}>
+                                    {a.status === 'passed' ? '\u2713' : a.status === 'skipped' ? '\u2013' : '\u2717'}
+                                  </span>
+                                  <span className="text-zinc-500 shrink-0 w-44 truncate" title={a.assertion_name}>
+                                    {a.assertion_name}
+                                  </span>
+                                  <span className="text-zinc-400 shrink-0 w-48 truncate font-mono" title={a.page_url ?? ''}>
+                                    {a.page_url ?? ''}
+                                  </span>
+                                  <span className={`${aColor} flex-1 truncate`} title={a.error_message ?? a.actual_value ?? '\u2014'}>
+                                    {a.error_message ?? (a.status === 'passed' ? (a.actual_value ?? 'OK') : a.actual_value) ?? '\u2014'}
+                                  </span>
                                 </div>
                               );
                             })}

@@ -2901,3 +2901,197 @@ Test file: `packages/email/src/email.test.ts` — 36 tests covering all modules,
 
 ---
 
+## May 10, 2026 — Phase 6: API Testing Layer
+
+**Date:** 2026-05-10
+**Status:** Complete
+**Commits:** 9a32458, 7c0904d, 4816bc6
+**Test count:** 201 (up from 164 at start of Phase 6)
+
+### Scope
+
+Phase 6 delivers a generic API validation framework that runs as a post-step within each browser flow execution. Four suite types:
+
+1. **Reachability** — endpoint health, status codes, response times
+2. **Schema validation** — Zod-based response body validation against field definitions
+3. **Business rules** — capacity, payment, age-restriction, coupon, cancellation checks
+4. **Cross-validation** — browser-captured state vs API response comparison
+
+### DB Changes
+
+#### Migration 0016 — api_test_tables.sql
+
+New tables:
+- `api_test_suites` — one row per suite type per execution
+- `api_test_assertions` — individual assertion results within a suite
+
+#### Stored Procedures (0097–0102)
+
+| # | Name | Purpose |
+|---|------|---------|
+| 0096 | `sp_run_executions_validate_token` | Validate callback token for runner auth |
+| 0097 | `sp_api_test_suites_insert` | Create a new API test suite record |
+| 0098 | `sp_api_test_suites_update` | Update suite status/summary after completion |
+| 0099 | `sp_api_test_assertions_insert` | Insert individual assertion result |
+| 0100 | `sp_api_test_assertions_insert_batch` | Batch insert assertion results |
+| 0101 | `sp_api_test_suites_list_by_execution` | List all suites for an execution |
+| 0102 | `sp_api_test_assertions_list_by_suite` | List assertions for a suite |
+
+### New Package: @qa-platform/api-testing
+
+Located at `packages/api-testing/`. Modules:
+
+| File | Responsibility |
+|------|---------------|
+| `src/types.ts` | All shared interfaces: ApiEndpointConfig, SuiteResult, AssertionResult |
+| `src/client.ts` | HTTP client with timeout, retry, response capture |
+| `src/reachability.ts` | Endpoint health checks with status code and timing validation |
+| `src/schema-validator.ts` | Zod-based response body validation against field definitions |
+| `src/business-rules.ts` | Capacity, payment, age-restriction, coupon, cancellation rule checks |
+| `src/cross-validator.ts` | Browser-captured state vs API response comparison |
+| `src/suite-runner.ts` | Orchestrates all four suite types for an execution |
+| `src/index.ts` | Barrel re-export |
+
+Test file: `packages/api-testing/src/api-testing.test.ts` — 37 tests covering all four suite modules.
+
+### Runner Integration
+
+- `apps/runner/src/execution-manager.ts` — extended ExecutionContext with capturedState; post-flow API validation step added
+- `packages/playwright-core/src/runner.ts` — added captureState() method for browser-to-API cross-validation
+
+### Dashboard UI Updates
+
+- `apps/dashboard-web/app/dashboard/runs/[runId]/page.tsx` — API Tests panel with collapsible suite rows, assertion detail table
+- `apps/dashboard-web/app/actions/apiTestResults.ts` — server actions for CRUD
+- `apps/dashboard-web/app/api/runner/callback/route.ts` — extended to handle API test result callbacks
+
+### Site Config
+
+- `sites/yugal-kunj/api-endpoints.ts` — stubbed endpoint definitions for reachability, schema, business-rule checks
+
+### Code Review Fixes (7c0904d, 4816bc6)
+
+- AbortController cleanup on timeout in API client
+- Error logging improvements in suite runner
+- File mode fix: removed executable flag from callback/route.ts
+
+### Files Created
+
+- `db/migrations/0016_api_test_tables.sql`
+- `db/procs/0096_sp_run_executions_validate_token.sql`
+- `db/procs/0097_sp_api_test_suites_insert.sql`
+- `db/procs/0098_sp_api_test_suites_update.sql`
+- `db/procs/0099_sp_api_test_assertions_insert.sql`
+- `db/procs/0100_sp_api_test_assertions_insert_batch.sql`
+- `db/procs/0101_sp_api_test_suites_list_by_execution.sql`
+- `db/procs/0102_sp_api_test_assertions_list_by_suite.sql`
+- `packages/api-testing/` (entire package — 8 source files + package.json + tsconfig.json)
+- `sites/yugal-kunj/api-endpoints.ts`
+- `apps/dashboard-web/app/actions/apiTestResults.ts`
+
+### Files Modified
+
+- `apps/dashboard-web/app/actions/runs.ts`
+- `apps/dashboard-web/app/actions/runs.test.ts`
+- `apps/dashboard-web/app/api/runner/callback/route.ts`
+- `apps/dashboard-web/app/api/runner/email-validate/route.ts`
+- `apps/dashboard-web/app/dashboard/runs/[runId]/page.tsx`
+- `apps/runner/src/execution-manager.ts`
+- `apps/runner/package.json`
+- `packages/playwright-core/src/runner.ts`
+- `sites/yugal-kunj/flows/checkout.ts`
+- `sites/yugal-kunj/flows/registration.ts`
+- `sites/yugal-kunj/flows/index.ts`
+- `vitest.config.ts`
+- `pnpm-lock.yaml`
+
+---
+
+## Phase 7: Admin and Back-Office Coverage
+
+**Date**: 2026-05-10
+**Status**: Complete
+**Master Plan Reference**: §8 — Admin & Back-Office Coverage
+
+### Summary
+
+Phase 7 adds five admin/back-office flows to the QA platform, along with their supporting database layer, callback route handling, dashboard UI panel, server actions, and unit tests. These flows cover the Yugal Kunj admin portal's login, booking/registration lookup, admin edit (with strong approval gating), and reporting screens.
+
+### Database Layer
+
+- **Migration 0017** (`db/migrations/0017_admin_test_tables.sql`) — creates `admin_test_suites` and `admin_test_assertions` tables, parallel structure to the Phase 6 `api_test_*` tables, with standard audit columns and FK to `run_executions`.
+- **Stored procedures 0103–0109**:
+  - `sp_admin_test_suites_insert` (0103) — insert a single admin test suite row
+  - `sp_admin_test_suites_update` (0104) — update suite status/counters after execution
+  - `sp_admin_test_assertions_insert` (0105) — insert a single assertion row
+  - `sp_admin_test_assertions_insert_batch` (0106) — batch-insert assertions via JSON array
+  - `sp_admin_test_suites_list_by_execution` (0107) — list all suites for a run execution
+  - `sp_admin_test_assertions_list_by_suite` (0108) — list all assertions for a suite
+  - `sp_admin_test_results_record` (0109) — transactional upsert with callback token validation; the single proc called by the runner callback
+
+### Rules Schema Extension
+
+- `packages/rules/src/schema.ts` — added `AdminRulesSchema` with fields for admin URLs (`admin_login_url`, `admin_dashboard_url`, `admin_booking_lookup_url`, `admin_registration_lookup_url`, `admin_reports_url`), `admin_role_tag`, `admin_credential_key`, and `editable_fields`. Exported `AdminRules` type.
+- `sites/yugal-kunj/rules.ts` — added admin config block and admin-specific selectors (`admin_login_button`, `admin_nav_bookings`, `admin_search_input`, etc.)
+
+### Admin Flows (5 flows)
+
+All flows created in `sites/yugal-kunj/flows/`:
+
+1. **admin-login.ts** — navigates to `#/login`, verifies login form, fills credentials, awaits `admin_write` approval, submits, verifies admin dashboard reached, accessibility check.
+2. **booking-lookup.ts** — navigates to `#/admin/bookings`, verifies list renders with data, tests search/filter, clicks first booking for detail view, accessibility check.
+3. **registration-lookup.ts** — navigates to `#/admin/registrations`, verifies list, searches, opens detail, verifies registration-specific fields, accessibility check.
+4. **admin-edit.ts** — from booking detail, clicks edit, fills form fields, awaits `admin_write` strong approval before save, verifies save success, accessibility check.
+5. **reporting-screens.ts** — navigates to `#/admin/reports`, verifies report tables render, checks for export functionality, accessibility check.
+
+Flows wired in `sites/yugal-kunj/flows/index.ts` with all five admin exports.
+
+### Callback Route Extension
+
+- `apps/dashboard-web/app/api/runner/callback/route.ts` — added `admin_test_result` payload type with Zod validation (`AdminAssertionSchema`, `AdminSuiteSchema`, `AdminTestResultPayloadSchema`). Handler validates payload, calls `sp_admin_test_results_record`, maps token errors to 401, DB errors to 500. Suite types: `admin_login`, `booking_lookup`, `registration_lookup`, `admin_edit`, `reporting_screens`.
+
+### Server Actions
+
+- `apps/dashboard-web/app/actions/adminTestResults.ts` — `listAdminTestSuites(runExecutionId)` and `listAdminTestAssertions(adminTestSuiteId)` with `run.read` capability enforcement, proc-backed data access, type-safe row mapping.
+
+### Dashboard UI
+
+- `apps/dashboard-web/app/dashboard/runs/[runId]/page.tsx` — added Admin Test Results panel with Shield icon, expandable suite rows showing pass/fail/skip counters, assertion detail tables with page_url column.
+
+### Unit Tests
+
+- **Callback route tests** (11 new tests in `route.test.ts`): Zod validation (missing execution_id, empty suites, invalid suite_type, invalid assertion status, negative counts), all 5 suite types accepted, successful write with proc verification, token validation failure (401), generic DB error (500), Zod defaults, admin-specific field serialisation (page_url).
+- **Server action tests** (15 tests in `adminTestResults.test.ts`): suite list mapping, proc call verification, empty results, date field mapping, null date handling, DB failure, auth enforcement; assertion list mapping, proc call, empty results, date mapping, null optional fields, detail object preservation, DB failure, auth enforcement.
+- Full test suite: **242/242 pass** across 15 test files.
+- Build: **14/14 tasks successful**.
+
+### Files Created
+
+- `db/migrations/0017_admin_test_tables.sql`
+- `db/procs/0103_sp_admin_test_suites_insert.sql`
+- `db/procs/0104_sp_admin_test_suites_update.sql`
+- `db/procs/0105_sp_admin_test_assertions_insert.sql`
+- `db/procs/0106_sp_admin_test_assertions_insert_batch.sql`
+- `db/procs/0107_sp_admin_test_suites_list_by_execution.sql`
+- `db/procs/0108_sp_admin_test_assertions_list_by_suite.sql`
+- `db/procs/0109_sp_admin_test_results_record.sql`
+- `sites/yugal-kunj/flows/admin-login.ts`
+- `sites/yugal-kunj/flows/booking-lookup.ts`
+- `sites/yugal-kunj/flows/registration-lookup.ts`
+- `sites/yugal-kunj/flows/admin-edit.ts`
+- `sites/yugal-kunj/flows/reporting-screens.ts`
+- `apps/dashboard-web/app/actions/adminTestResults.ts`
+- `apps/dashboard-web/app/actions/adminTestResults.test.ts`
+
+### Files Modified
+
+- `PROJECT_DEVELOPMENT_LOG.md` — Phase 6 completion entry + Phase 7 completion entry
+- `packages/rules/src/schema.ts` — AdminRulesSchema added
+- `sites/yugal-kunj/rules.ts` — admin config and admin selectors
+- `sites/yugal-kunj/flows/index.ts` — admin flow exports
+- `apps/dashboard-web/app/api/runner/callback/route.ts` — admin_test_result handler + Zod schemas
+- `apps/dashboard-web/app/api/runner/callback/route.test.ts` — 11 admin test result tests
+- `apps/dashboard-web/app/dashboard/runs/[runId]/page.tsx` — admin test results panel
+
+---
+

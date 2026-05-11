@@ -81,6 +81,25 @@ const SelectorsSchema = z.object({
   error_message: z.string().optional(),
 }).catchall(z.string());
 
+// ─── Admin / Back-Office ──────────────────────────────────────────────────────
+
+const AdminConfigSchema = z.object({
+  /** Admin login URL or hash route (e.g., '#/admin/login') */
+  login_url: z.string().min(1),
+  /** Admin dashboard base URL or hash route after login */
+  dashboard_url: z.string().min(1),
+  /** Route or URL pattern for booking lookups */
+  booking_lookup_url: z.string().optional(),
+  /** Route or URL pattern for registration lookups */
+  registration_lookup_url: z.string().optional(),
+  /** Route or URL pattern for reporting/list screens */
+  reporting_url: z.string().optional(),
+  /** Whether the admin panel is a separate app or the same SPA */
+  separate_app: z.boolean().default(false),
+  /** Credential reference key in the vault for admin login */
+  credential_key: z.string().default('admin'),
+});
+
 // ─── Root SiteRules ──────────────────────────────────────────────────────────
 
 export const SiteRulesSchema = z.object({
@@ -94,6 +113,9 @@ export const SiteRulesSchema = z.object({
   payment: PaymentRulesSchema.optional(),
   cancellation: CancellationRulesSchema.optional(),
   registration: RegistrationFlowSchema.optional(),
+
+  /** Admin / back-office configuration — Phase 7 */
+  admin: AdminConfigSchema.optional(),
 
   /** Site-specific CSS/ARIA selectors — override defaults in flows */
   selectors: SelectorsSchema.optional(),
@@ -113,3 +135,4 @@ export type PaymentRules = z.infer<typeof PaymentRulesSchema>;
 export type CancellationRules = z.infer<typeof CancellationRulesSchema>;
 export type RegistrationFlow = z.infer<typeof RegistrationFlowSchema>;
 export type Selectors = z.infer<typeof SelectorsSchema>;
+export type AdminConfig = z.infer<typeof AdminConfigSchema>;

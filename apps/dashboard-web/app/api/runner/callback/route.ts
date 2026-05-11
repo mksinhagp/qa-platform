@@ -58,6 +58,38 @@ const ApiTestResultPayloadSchema = z.object({
   suites: z.array(ApiSuiteSchema).min(1),
 });
 
+// ─── Zod schema for the Phase 7 admin_test_result payload ──────────────────
+const AdminAssertionSchema = z.object({
+  assertion_name: z.string(),
+  status: z.enum(['passed', 'failed', 'error', 'skipped']),
+  page_url: z.string().nullish(),
+  expected_value: z.string().nullish(),
+  actual_value: z.string().nullish(),
+  error_message: z.string().nullish(),
+  detail: z.unknown().nullish(),
+});
+
+const AdminSuiteSchema = z.object({
+  suite_type: z.enum(['admin_login', 'booking_lookup', 'registration_lookup', 'admin_edit', 'reporting_screens']),
+  status: z.enum(['passed', 'failed', 'error', 'skipped']),
+  total_assertions: z.number().int().nonnegative().default(0),
+  passed_assertions: z.number().int().nonnegative().default(0),
+  failed_assertions: z.number().int().nonnegative().default(0),
+  skipped_assertions: z.number().int().nonnegative().default(0),
+  started_at: z.string().datetime().optional(),
+  completed_at: z.string().datetime().optional(),
+  duration_ms: z.number().int().nonnegative().nullish(),
+  error_message: z.string().nullish(),
+  metadata: z.unknown().nullish(),
+  assertions: z.array(AdminAssertionSchema).default([]),
+});
+
+const AdminTestResultPayloadSchema = z.object({
+  type: z.literal('admin_test_result'),
+  execution_id: z.number().int().positive(),
+  suites: z.array(AdminSuiteSchema).min(1),
+});
+
 // Hardcoded fallback strengths — mirrors packages/approvals/src/types.ts DEFAULT_STRENGTHS
 const DEFAULT_STRENGTHS: Record<string, string> = {
   registration_submit: 'one_click',
@@ -237,6 +269,38 @@ export async function POST(request: NextRequest) {
       }
       console.error('API test result callback error:', { execution_id: executionId, correlation_id: correlationId, error: err });
       return NextResponse.json({ error: 'Failed to record API test results' }, { status: 500 });
+    }
+  }
+
+  // ─── Handle admin test results (Phase 7) ──────────────────────────────────
+  if (type === 'admin_test_result') {
+    const parsed = AdminTestResultPayloadSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid admin_test_result payload', details: parsed.error.flatten() },
+        { status: 400 },
+      );
+    }
+    const { execution_id: executionId, suites } = parsed.data;
+
+    try {
+      const rows = await invokeProcWrite('sp_admin_test_results_record', {
+        i_run_execution_id: executionId,
+        i_callback_token: token,
+        i_suites_json: JSON.stringify(suites),
+        i_created_by: 'runner',
+      });
+      return NextResponse.json({
+        success: true,
+        suites_processed: Array.isArray(rows) ? rows.length : suites.length,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('invalid_callback_token')) {
+        return NextResponse.json({ error: 'Invalid callback token' }, { status: 401 });
+      }
+      console.error('Admin test result callback error:', { execution_id: executionId, correlation_id: correlationId, error: err });
+      return NextResponse.json({ error: 'Failed to record admin test results' }, { status: 500 });
     }
   }
 

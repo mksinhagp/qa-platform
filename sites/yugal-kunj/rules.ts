@@ -51,6 +51,16 @@ const rules: SiteRules = {
     confirmation_email_subject_pattern: 'Registration Confirmation',
   },
 
+  admin: {
+    login_url: '#/login',
+    dashboard_url: '#/admin',
+    booking_lookup_url: '#/admin/bookings',
+    registration_lookup_url: '#/admin/registrations',
+    reporting_url: '#/admin/reports',
+    separate_app: false,
+    credential_key: 'admin',
+  },
+
   selectors: {
     // SPA top-level nav — hash-based routing
     camp_list_item: '.camp-card, [class*="camp"], [class*="Camp"]',
@@ -68,9 +78,22 @@ const rules: SiteRules = {
     // Feedback
     success_message: '[class*="success"], [class*="Success"], [class*="confirm"]',
     error_message: '[class*="error"], [class*="Error"], .alert-danger',
+
+    // Admin / back-office selectors — Phase 7
+    admin_login_form: 'form[class*="login"], form[class*="Login"], #loginForm',
+    admin_email_input: 'input[name="email"], input[name="username"], input[type="email"]',
+    admin_password_input: 'input[name="password"], input[type="password"]',
+    admin_login_submit: 'button[type="submit"], button[class*="login"], button[class*="Login"]',
+    admin_nav_menu: 'nav, [class*="sidebar"], [class*="Sidebar"], [class*="nav"]',
+    admin_booking_table: 'table, [class*="table"], [class*="Table"], [class*="booking-list"]',
+    admin_registration_table: 'table, [class*="table"], [class*="Table"], [class*="registration-list"]',
+    admin_search_input: 'input[type="search"], input[name="search"], input[placeholder*="Search"]',
+    admin_edit_button: 'button[class*="edit"], button[class*="Edit"], a[class*="edit"]',
+    admin_save_button: 'button[type="submit"], button[class*="save"], button[class*="Save"]',
+    admin_report_container: '[class*="report"], [class*="Report"], [class*="chart"], [class*="Chart"]',
   },
 
-  elevated_approval_categories: ['registration_submit', 'checkout_submit'],
+  elevated_approval_categories: ['registration_submit', 'checkout_submit', 'admin_write', 'admin_delete'],
 
   notes:
     'QA-only portal at ykportalnextgenqa.yugalkunj.org. ' +
