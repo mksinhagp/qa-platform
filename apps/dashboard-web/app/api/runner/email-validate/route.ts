@@ -21,7 +21,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { invokeProc } from '@qa-platform/db';
 import { decryptSecret } from '@qa-platform/vault';
-import { startEmailValidation } from '../../../actions/emailValidation.js';
+import { startEmailValidation } from '../../../actions/emailValidation';
 import type { ImapConfig } from '@qa-platform/email';
 
 export async function POST(request: NextRequest) {

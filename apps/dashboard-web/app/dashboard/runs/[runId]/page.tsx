@@ -168,6 +168,13 @@ export default function RunDetailPage({
   const [apiTestAssertions, setApiTestAssertions] = useState<Record<number, ApiTestAssertionRecord[]>>({});
   const [expandedApiSuite, setExpandedApiSuite] = useState<number | null>(null);
   const fetchingApiAssertions = useRef<Set<number>>(new Set());
+  // Mirror of expandedApiSuite for use inside loadData without triggering the
+  // useCallback dep-chain (which would otherwise re-run the initial-load effect
+  // and reset the auto-refresh interval on every expand/collapse).
+  const expandedApiSuiteRef = useRef<number | null>(null);
+  useEffect(() => {
+    expandedApiSuiteRef.current = expandedApiSuite;
+  }, [expandedApiSuite]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -223,7 +230,25 @@ export default function RunDetailPage({
         }),
       );
       setApiTestSuites(allApiSuites);
-      setApiTestAssertions({});
+      // Invalidate cached assertion results so they are re-fetched on next expand,
+      // but preserve assertions for the currently expanded suite to avoid UI flash.
+      const currentExpanded = expandedApiSuiteRef.current;
+      setApiTestAssertions(prev => {
+        if (currentExpanded == null) return {};
+        const kept = prev[currentExpanded];
+        return kept ? { [currentExpanded]: kept } : {};
+      });
+      // Re-fetch assertions for expanded suite in the background (may have changed)
+      if (currentExpanded != null && !fetchingApiAssertions.current.has(currentExpanded)) {
+        fetchingApiAssertions.current.add(currentExpanded);
+        listApiTestAssertions(currentExpanded).then(res => {
+          if (res.success && res.assertions) {
+            setApiTestAssertions(p => ({ ...p, [currentExpanded]: res.assertions! }));
+          }
+        }).finally(() => {
+          fetchingApiAssertions.current.delete(currentExpanded);
+        });
+      }
     } catch {
       setError('An error occurred while loading run');
     } finally {

@@ -87,9 +87,36 @@ export interface ExecutionState {
   error?: string;
 }
 
+// ─── Cache TTL ────────────────────────────────────────────────────────────────
+
+// Cache TTL is bounded in all environments so newly-added site flows /
+// api-endpoints files are eventually picked up without a runner restart.
+// Dev uses a short TTL for fast iteration; production uses 5 minutes which is
+// a good balance between hot-deploy responsiveness and import overhead.
+const CACHE_TTL_MS = process.env.NODE_ENV === 'production' ? 5 * 60_000 : 30_000;
+
+interface CacheEntry<T> {
+  value: T;
+  expiresAt: number;
+}
+
+function getCached<T>(cache: Map<string, CacheEntry<T>>, key: string): T | undefined {
+  const entry = cache.get(key);
+  if (!entry) return undefined;
+  if (Date.now() >= entry.expiresAt) {
+    cache.delete(key);
+    return undefined;
+  }
+  return entry.value;
+}
+
+function setCached<T>(cache: Map<string, CacheEntry<T>>, key: string, value: T): void {
+  cache.set(key, { value, expiresAt: Date.now() + CACHE_TTL_MS });
+}
+
 // ─── Flow registry ────────────────────────────────────────────────────────────
 
-const flowCache = new Map<string, Record<string, FlowDefinition>>();
+const flowCache = new Map<string, CacheEntry<Record<string, FlowDefinition>>>();
 
 // Validate siteId to prevent path traversal — only allow alphanumeric, hyphens, underscores
 function validateSiteId(siteId: string): void {
@@ -104,7 +131,7 @@ function validateSiteId(siteId: string): void {
  */
 async function loadFlows(siteId: string, baseUrl: string): Promise<Record<string, FlowDefinition>> {
   validateSiteId(siteId);
-  const cached = flowCache.get(siteId);
+  const cached = getCached(flowCache, siteId);
   if (cached) return cached;
 
   try {
@@ -118,7 +145,7 @@ async function loadFlows(siteId: string, baseUrl: string): Promise<Record<string
     }
     const mod = await import(flowPath) as { flows?: Record<string, FlowDefinition> };
     const flows = mod.flows ?? {};
-    flowCache.set(siteId, flows);
+    setCached(flowCache, siteId, flows);
     logger.info(`Loaded ${Object.keys(flows).length} flows for site "${siteId}"`);
     return flows;
   } catch (err) {
@@ -149,7 +176,7 @@ async function loadFlows(siteId: string, baseUrl: string): Promise<Record<string
 
 // ─── API endpoint loading ────────────────────────────────────────────────────
 
-const apiEndpointCache = new Map<string, ApiEndpointConfig[]>();
+const apiEndpointCache = new Map<string, CacheEntry<ApiEndpointConfig[]>>();
 
 /**
  * Load API endpoints for a site from sites/<siteId>/api-endpoints.js.
@@ -157,29 +184,37 @@ const apiEndpointCache = new Map<string, ApiEndpointConfig[]>();
  */
 async function loadApiEndpoints(siteId: string): Promise<ApiEndpointConfig[]> {
   validateSiteId(siteId);
-  const cached = apiEndpointCache.get(siteId);
+  const cached = getCached(apiEndpointCache, siteId);
   if (cached) return cached;
 
+  const sitesRoot = process.env.BUSINESS_RULES_PATH ?? './sites';
+  const resolvedRoot = path.resolve(sitesRoot);
+  const jsPath = path.resolve(sitesRoot, siteId, 'api-endpoints.js');
+  const tsPath = path.resolve(sitesRoot, siteId, 'api-endpoints.ts');
+  const endpointPath = existsSync(jsPath) ? jsPath : existsSync(tsPath) ? tsPath : null;
+
+  if (!endpointPath) {
+    logger.info(`No API endpoints file found for site "${siteId}" — API testing will be skipped`);
+    setCached(apiEndpointCache, siteId, []);
+    return [];
+  }
+
+  if (!endpointPath.startsWith(resolvedRoot + path.sep)) {
+    throw new Error(`Path traversal detected for site "${siteId}"`);
+  }
+
   try {
-    const sitesRoot = process.env.BUSINESS_RULES_PATH ?? './sites';
-    const resolvedRoot = path.resolve(sitesRoot);
-    const jsPath = path.resolve(sitesRoot, siteId, 'api-endpoints.js');
-    const tsPath = path.resolve(sitesRoot, siteId, 'api-endpoints.ts');
-    const endpointPath = existsSync(jsPath) ? jsPath : tsPath;
-    if (!endpointPath.startsWith(resolvedRoot + path.sep)) {
-      throw new Error(`Path traversal detected for site "${siteId}"`);
-    }
     const mod = await import(endpointPath) as {
       apiEndpoints?: ApiEndpointConfig[];
       default?: ApiEndpointConfig[];
     };
     const endpoints = mod.apiEndpoints ?? mod.default ?? [];
-    apiEndpointCache.set(siteId, endpoints);
+    setCached(apiEndpointCache, siteId, endpoints);
     logger.info(`Loaded ${endpoints.length} API endpoints for site "${siteId}"`);
     return endpoints;
-  } catch {
-    logger.info(`No API endpoints file found for site "${siteId}" — API testing will be skipped`);
-    apiEndpointCache.set(siteId, []);
+  } catch (err) {
+    // Don't cache on import errors — file exists but failed to load (transient/syntax issue)
+    logger.warn(`Failed to load API endpoints for site "${siteId}": ${String(err)}`);
     return [];
   }
 }
@@ -431,6 +466,65 @@ function validateCallbackUrl(callbackUrl: string): void {
 const CALLBACK_MAX_RETRIES = 3;
 const CALLBACK_BASE_DELAY_MS = 1000;
 
+/**
+ * POST a JSON body to a runner callback URL with exponential-backoff retries.
+ * Used by both execution_result and api_test_result callbacks so they share
+ * identical retry semantics (4xx not retried; 5xx / network errors retried up
+ * to CALLBACK_MAX_RETRIES times with 1s, 2s, 4s backoff).
+ */
+async function postCallbackWithRetry(
+  callbackUrl: string,
+  token: string,
+  payload: string,
+  executionId: number,
+  correlationId: string,
+  label: string,
+): Promise<boolean> {
+  validateCallbackUrl(callbackUrl);
+
+  for (let attempt = 0; attempt <= CALLBACK_MAX_RETRIES; attempt++) {
+    try {
+      const resp = await fetch(callbackUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Runner-Token': token,
+          'X-Correlation-Id': correlationId,
+        },
+        body: payload,
+      });
+
+      if (resp.ok) return true;
+
+      // 4xx errors are not retryable (client error / auth issue)
+      if (resp.status >= 400 && resp.status < 500) {
+        logger.warn(`${label} returned ${resp.status} (not retryable)`, { execution_id: executionId }, correlationId);
+        return false;
+      }
+
+      logger.warn(`${label} returned ${resp.status} (attempt ${attempt + 1}/${CALLBACK_MAX_RETRIES + 1})`, { execution_id: executionId }, correlationId);
+    } catch (err) {
+      logger.warn(
+        `${label} attempt ${attempt + 1}/${CALLBACK_MAX_RETRIES + 1} failed: ${String(err)}`,
+        { execution_id: executionId },
+        correlationId,
+      );
+    }
+
+    if (attempt < CALLBACK_MAX_RETRIES) {
+      await sleep(CALLBACK_BASE_DELAY_MS * Math.pow(2, attempt));
+    }
+  }
+
+  logger.error(
+    `${label} failed after all retries`,
+    new Error(`${label} exhausted ${CALLBACK_MAX_RETRIES + 1} attempts`),
+    { execution_id: executionId },
+    correlationId,
+  );
+  return false;
+}
+
 async function sendCallback(
   callbackUrl: string,
   token: string,
@@ -438,7 +532,6 @@ async function sendCallback(
   result: ExecutionResult,
   correlationId: string,
 ): Promise<void> {
-  validateCallbackUrl(callbackUrl);
   const body = {
     type: 'execution_result',
     execution_id: executionId,
@@ -465,47 +558,13 @@ async function sendCallback(
     completed_at: result.completed_at.toISOString(),
   };
 
-  const payload = JSON.stringify(body);
-
-  for (let attempt = 0; attempt <= CALLBACK_MAX_RETRIES; attempt++) {
-    try {
-      const resp = await fetch(callbackUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Runner-Token': token,
-          'X-Correlation-Id': correlationId,
-        },
-        body: payload,
-      });
-
-      if (resp.ok) return;
-
-      // 4xx errors are not retryable (client error / auth issue)
-      if (resp.status >= 400 && resp.status < 500) {
-        logger.warn(`Callback returned ${resp.status} (not retryable)`, { execution_id: executionId }, correlationId);
-        return;
-      }
-
-      logger.warn(`Callback returned ${resp.status} (attempt ${attempt + 1}/${CALLBACK_MAX_RETRIES + 1})`, { execution_id: executionId }, correlationId);
-    } catch (err) {
-      logger.warn(
-        `Callback attempt ${attempt + 1}/${CALLBACK_MAX_RETRIES + 1} failed: ${String(err)}`,
-        { execution_id: executionId },
-        correlationId,
-      );
-    }
-
-    if (attempt < CALLBACK_MAX_RETRIES) {
-      await sleep(CALLBACK_BASE_DELAY_MS * Math.pow(2, attempt));
-    }
-  }
-
-  logger.error(
-    'Callback failed after all retries',
-    new Error(`sendCallback exhausted ${CALLBACK_MAX_RETRIES + 1} attempts`),
-    { execution_id: executionId },
+  await postCallbackWithRetry(
+    callbackUrl,
+    token,
+    JSON.stringify(body),
+    executionId,
     correlationId,
+    'Callback',
   );
 }
 
@@ -595,17 +654,41 @@ async function runApiTestPostStep(
     correlationId,
   );
 
+  // runApiTests catches its own internal failures and returns an error-suite,
+  // so this catch only fires for truly unexpected synchronous throws. When it
+  // does, emit a minimal error-suite so the dashboard still records that the
+  // API test phase ran and failed (instead of silently disappearing).
   let suiteResults: ApiSuiteResult[];
   try {
     suiteResults = await runApiTests(apiConfig);
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
     logger.error(
-      `Execution ${ex.execution_id}: API test suite failed`,
-      err instanceof Error ? err : new Error(String(err)),
+      `Execution ${ex.execution_id}: API test suite threw unexpectedly`,
+      err instanceof Error ? err : new Error(message),
       undefined,
       correlationId,
     );
-    return;
+    const now = new Date();
+    suiteResults = [{
+      suite_type: 'reachability',
+      status: 'error',
+      assertions: [{
+        endpoint_url: ex.base_url,
+        http_method: 'GET',
+        assertion_name: 'api_test_phase_error',
+        status: 'error',
+        error_message: message,
+      }],
+      total_assertions: 1,
+      passed_assertions: 0,
+      failed_assertions: 1,
+      skipped_assertions: 0,
+      started_at: now,
+      completed_at: now,
+      duration_ms: 0,
+      metadata: { reason: 'unexpected_throw' },
+    }];
   }
 
   // Report API test results to dashboard
@@ -628,8 +711,6 @@ async function sendApiTestCallback(
   suiteResults: ApiSuiteResult[],
   correlationId: string,
 ): Promise<void> {
-  validateCallbackUrl(ex.callback_url);
-
   const body = {
     type: 'api_test_result',
     execution_id: ex.execution_id,
@@ -660,31 +741,18 @@ async function sendApiTestCallback(
     })),
   };
 
-  try {
-    const resp = await fetch(ex.callback_url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Runner-Token': ex.callback_token,
-        'X-Correlation-Id': correlationId,
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (!resp.ok) {
-      logger.warn(
-        `API test callback for execution ${ex.execution_id} returned ${resp.status}`,
-        undefined,
-        correlationId,
-      );
-    }
-  } catch (err) {
-    logger.warn(
-      `API test callback for execution ${ex.execution_id} failed: ${String(err)}`,
-      undefined,
-      correlationId,
-    );
-  }
+  // Use the shared retrying callback poster so api_test_result has the same
+  // delivery semantics as execution_result (idempotent retries with backoff).
+  // The dashboard-side proc is idempotent (sp_api_test_results_record), so a
+  // retried POST converges to the same final state instead of duplicating rows.
+  await postCallbackWithRetry(
+    ex.callback_url,
+    ex.callback_token,
+    JSON.stringify(body),
+    ex.execution_id,
+    correlationId,
+    'API test callback',
+  );
 }
 
 function sleep(ms: number): Promise<void> {

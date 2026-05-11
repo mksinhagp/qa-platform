@@ -24,6 +24,8 @@ export interface ClientOptions {
   auth_header?: string;
   /** Additional default headers */
   default_headers?: Record<string, string>;
+  /** Optional external abort signal — when aborted, in-flight and pending requests are cancelled */
+  signal?: AbortSignal;
 }
 
 const TRANSIENT_STATUS_CODES = new Set([408, 429, 502, 503, 504]);
@@ -70,9 +72,35 @@ export async function executeRequest(
 
   let lastError: Error | null = null;
 
+  // If the external signal is already aborted, short-circuit without any HTTP work.
+  if (options.signal?.aborted) {
+    return {
+      endpoint_id: endpoint.id,
+      url,
+      method: endpoint.method ?? 'GET',
+      status: 0,
+      status_text: 'Aborted',
+      headers: {},
+      body: null,
+      body_text: '',
+      response_time_ms: 0,
+      error: 'Request aborted before dispatch',
+    };
+  }
+
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeout);
+    // Forward external aborts (e.g., overall API-phase timeout) to this request.
+    const onExternalAbort = () => controller.abort();
+    let listenerAdded = false;
+    if (options.signal) {
+      if (options.signal.aborted) controller.abort();
+      else {
+        options.signal.addEventListener('abort', onExternalAbort, { once: true });
+        listenerAdded = true;
+      }
+    }
     const startTime = performance.now();
 
     try {
@@ -130,27 +158,34 @@ export async function executeRequest(
       const responseTime = Math.round(performance.now() - startTime);
       lastError = err instanceof Error ? err : new Error(String(err));
 
-      // Don't retry on abort (timeout) or non-transient errors on last attempt
-      if (attempt >= maxRetries - 1 || controller.signal.aborted) {
+      // Don't retry on abort (timeout, external cancel) or non-transient errors on last attempt
+      const externallyAborted = options.signal?.aborted === true;
+      if (attempt >= maxRetries - 1 || controller.signal.aborted || externallyAborted) {
+        const errorMessage = externallyAborted
+          ? 'Request aborted by overall API test timeout'
+          : controller.signal.aborted
+          ? `Request timed out after ${timeout}ms`
+          : lastError.message;
         return {
           endpoint_id: endpoint.id,
           url,
           method: endpoint.method ?? 'GET',
           status: 0,
-          status_text: 'Error',
+          status_text: externallyAborted ? 'Aborted' : 'Error',
           headers: {},
           body: null,
           body_text: '',
           response_time_ms: responseTime,
-          error: controller.signal.aborted
-            ? `Request timed out after ${timeout}ms`
-            : lastError.message,
+          error: errorMessage,
         };
       }
 
       await sleep(retryDelay);
     } finally {
       clearTimeout(timer);
+      if (listenerAdded) {
+        options.signal?.removeEventListener('abort', onExternalAbort);
+      }
     }
   }
 
@@ -179,8 +214,10 @@ export async function executeAllRequests(
 ): Promise<Map<string, ApiResponse>> {
   const results = new Map<string, ApiResponse>();
 
-  // Process in batches for concurrency control
+  // Process in batches for concurrency control. If the external signal aborts
+  // mid-flight, stop dispatching new batches immediately.
   for (let i = 0; i < endpoints.length; i += concurrency) {
+    if (options.signal?.aborted) break;
     const batch = endpoints.slice(i, i + concurrency);
     const batchResults = await Promise.all(
       batch.map(ep => executeRequest(ep, options)),

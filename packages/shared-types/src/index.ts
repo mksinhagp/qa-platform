@@ -25,5 +25,8 @@ export * from "./vault.types";
 // Artifact types
 export * from "./artifact.types";
 
+// Browser types
+export * from "./browser.types";
+
 // Logging utilities
 export * from "./logging";

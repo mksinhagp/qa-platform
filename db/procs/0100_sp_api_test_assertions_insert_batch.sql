@@ -45,7 +45,7 @@ BEGIN
         (a->>'response_status')::INTEGER,
         (a->>'response_time_ms')::INTEGER,
         a->>'error_message',
-        a->'detail',
+        NULLIF(a->'detail', 'null'::jsonb),
         i_created_by,
         i_created_by
     FROM jsonb_array_elements(i_assertions) AS a;

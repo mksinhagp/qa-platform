@@ -81,7 +81,6 @@ function endpointsForSuite(endpoints: ApiEndpointConfig[], suiteType: ApiSuiteTy
  * 3. Return structured suite results for callback to dashboard
  */
 export async function runApiTests(config: ApiTestConfig): Promise<ApiSuiteResult[]> {
-  const suiteResults: ApiSuiteResult[] = [];
   const overallTimeout = config.overall_timeout_ms ?? DEFAULT_OVERALL_TIMEOUT_MS;
 
   // Guard: no endpoints configured
@@ -107,6 +106,69 @@ export async function runApiTests(config: ApiTestConfig): Promise<ApiSuiteResult
     }];
   }
 
+  // Enforce overall_timeout_ms as a wall-clock deadline via Promise.race.
+  // The AbortController is wired through to the HTTP client so that any
+  // in-flight requests are cancelled when the deadline elapses — this prevents
+  // side-effecting (POST/PUT/etc.) requests from completing after we've already
+  // reported the API phase as timed out.
+  const abortController = new AbortController();
+  let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    deadlineTimer = setTimeout(() => {
+      abortController.abort();
+      reject(new Error('API_TEST_TIMEOUT'));
+    }, overallTimeout);
+  });
+
+  try {
+    return await Promise.race([
+      runApiTestsInner(config, overallTimeout, abortController.signal),
+      deadline,
+    ]);
+  } catch (err) {
+    const isTimeout = err instanceof Error && err.message === 'API_TEST_TIMEOUT';
+    const errorMessage = isTimeout
+      ? `API test phase exceeded overall timeout of ${overallTimeout}ms`
+      : `API test phase failed: ${err instanceof Error ? err.message : String(err)}`;
+
+    return [{
+      suite_type: 'reachability',
+      status: 'error',
+      assertions: [{
+        endpoint_url: config.base_url,
+        http_method: 'GET',
+        assertion_name: 'overall_timeout',
+        status: 'error',
+        error_message: errorMessage,
+      }],
+      total_assertions: 1,
+      passed_assertions: 0,
+      failed_assertions: 1,
+      skipped_assertions: 0,
+      started_at: new Date(),
+      completed_at: new Date(),
+      duration_ms: overallTimeout,
+      metadata: { reason: isTimeout ? 'timeout' : 'error', timeout_ms: overallTimeout },
+    }];
+  } finally {
+    if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+    // Ensure the inner pipeline's HTTP work is aborted if it is still running
+    // (e.g. when runApiTestsInner threw before the deadline fired).
+    if (!abortController.signal.aborted) abortController.abort();
+  }
+}
+
+/**
+ * Inner implementation of runApiTests — separated so that the outer function
+ * can enforce an overall wall-clock deadline via Promise.race.
+ */
+async function runApiTestsInner(
+  config: ApiTestConfig,
+  overallTimeout: number,
+  signal: AbortSignal,
+): Promise<ApiSuiteResult[]> {
+  const suiteResults: ApiSuiteResult[] = [];
+
   // Separate auth-required endpoints (skip if no auth provided)
   const endpointsToTest = config.endpoints.filter(ep => {
     if (ep.requires_auth && !config.auth_header) {
@@ -126,6 +188,7 @@ export async function runApiTests(config: ApiTestConfig): Promise<ApiSuiteResult
     max_retries: 2,
     retry_delay_ms: 1_000,
     auth_header: config.auth_header,
+    signal,
   };
 
   // Fetch all responses

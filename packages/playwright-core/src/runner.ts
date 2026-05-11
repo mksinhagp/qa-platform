@@ -10,7 +10,7 @@
  */
 
 import type { Browser, Page } from '@playwright/test';
-import type { Persona } from '@qa-platform/shared-types';
+import type { Persona, BrowserCapturedState } from '@qa-platform/shared-types';
 import { AssistiveTech, MotorProfile } from '@qa-platform/shared-types';
 import { createPersonaContext } from './context.js';
 import { personaType, personaHesitate, personaClick } from './typing.js';
@@ -72,22 +72,8 @@ export interface ExecutionContext {
   };
 }
 
-/**
- * State captured during browser flow execution, used by Phase 6 API cross-validation.
- * Flow steps call runner.captureState() to record values observed in the browser.
- */
-export interface BrowserCapturedState {
-  confirmation_id?: string;
-  email_used?: string;
-  name_used?: string;
-  phone_used?: string;
-  order_total?: string;
-  payment_status?: string;
-  session_name?: string;
-  attendee_count?: number;
-  confirmation_url?: string;
-  custom: Record<string, string>;
-}
+// Re-export BrowserCapturedState from shared-types (single source of truth)
+export type { BrowserCapturedState } from '@qa-platform/shared-types';
 
 export class PersonaRunner {
   private _browser: Browser;

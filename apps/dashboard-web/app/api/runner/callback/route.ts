@@ -18,7 +18,45 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { z } from 'zod';
 import { invokeProc, invokeProcWrite } from '@qa-platform/db';
+
+// ─── Zod schema for the Phase 6 api_test_result payload ───────────────────────
+// Validates the full shape up-front so downstream procs receive well-typed
+// data and don't fail mid-write with a Postgres type error.
+const ApiAssertionSchema = z.object({
+  endpoint_url: z.string(),
+  http_method: z.string(),
+  assertion_name: z.string(),
+  status: z.enum(['passed', 'failed', 'error', 'skipped']),
+  expected_value: z.string().nullish(),
+  actual_value: z.string().nullish(),
+  response_status: z.number().int().nullish(),
+  response_time_ms: z.number().int().nullish(),
+  error_message: z.string().nullish(),
+  detail: z.unknown().nullish(),
+});
+
+const ApiSuiteSchema = z.object({
+  suite_type: z.enum(['reachability', 'schema', 'business_rules', 'cross_validation']),
+  status: z.enum(['passed', 'failed', 'error', 'skipped']),
+  total_assertions: z.number().int().nonnegative().default(0),
+  passed_assertions: z.number().int().nonnegative().default(0),
+  failed_assertions: z.number().int().nonnegative().default(0),
+  skipped_assertions: z.number().int().nonnegative().default(0),
+  started_at: z.string().datetime().optional(),
+  completed_at: z.string().datetime().optional(),
+  duration_ms: z.number().int().nonnegative().nullish(),
+  error_message: z.string().nullish(),
+  metadata: z.unknown().nullish(),
+  assertions: z.array(ApiAssertionSchema).default([]),
+});
+
+const ApiTestResultPayloadSchema = z.object({
+  type: z.literal('api_test_result'),
+  execution_id: z.number().int().positive(),
+  suites: z.array(ApiSuiteSchema).min(1),
+});
 
 // Hardcoded fallback strengths — mirrors packages/approvals/src/types.ts DEFAULT_STRENGTHS
 const DEFAULT_STRENGTHS: Record<string, string> = {
@@ -164,74 +202,40 @@ export async function POST(request: NextRequest) {
 
   // ─── Handle API test results (Phase 6) ────────────────────────────────────
   if (type === 'api_test_result') {
-    const executionId = body.execution_id as number | undefined;
-    const suites = body.suites as Array<Record<string, unknown>> | undefined;
-
-    if (!executionId || !Array.isArray(suites)) {
+    // Validate the full payload up-front. Malformed payloads return 400 with
+    // a clear error instead of failing mid-write with a Postgres type error.
+    const parsed = ApiTestResultPayloadSchema.safeParse(body);
+    if (!parsed.success) {
       return NextResponse.json(
-        { error: 'execution_id and suites[] are required for api_test_result' },
+        { error: 'Invalid api_test_result payload', details: parsed.error.flatten() },
         { status: 400 },
       );
     }
+    const { execution_id: executionId, suites } = parsed.data;
 
-    // Validate callback token
+    // Single transactional, idempotent write: sp_api_test_results_record
+    //  - Validates the callback token inside the proc (raises 28000 on
+    //    mismatch, which we map to 401).
+    //  - Upserts each suite row, deletes existing assertions for the suite,
+    //    then batch-inserts the provided assertions. Safe to retry: a replay
+    //    converges to the same final state instead of duplicating rows.
     try {
-      const tokenRows = await invokeProc('sp_run_executions_validate_token', {
-        i_id: executionId,
+      const rows = await invokeProcWrite('sp_api_test_results_record', {
+        i_run_execution_id: executionId,
         i_callback_token: token,
+        i_suites_json: JSON.stringify(suites),
+        i_created_by: 'runner',
       });
-      type TokenRow = { o_valid: boolean };
-      const valid = (tokenRows as TokenRow[])[0]?.o_valid;
-      if (!valid) {
+      return NextResponse.json({
+        success: true,
+        suites_processed: Array.isArray(rows) ? rows.length : suites.length,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.includes('invalid_callback_token')) {
         return NextResponse.json({ error: 'Invalid callback token' }, { status: 401 });
       }
-    } catch {
-      return NextResponse.json({ error: 'Token validation failed' }, { status: 401 });
-    }
-
-    try {
-      for (const suite of suites) {
-        const suiteType = suite.suite_type as string;
-        const suiteStatus = suite.status as string;
-        const assertions = suite.assertions as Array<Record<string, unknown>> | undefined;
-
-        // Insert suite record
-        const suiteResult = await invokeProcWrite('sp_api_test_suites_insert', {
-          i_run_execution_id: executionId,
-          i_suite_type: suiteType,
-          i_metadata: suite.metadata ? JSON.stringify(suite.metadata) : null,
-          i_created_by: 'runner',
-        });
-
-        const suiteId = suiteResult[0]?.o_id as number | undefined;
-        if (!suiteId) continue;
-
-        // Batch insert assertions if present
-        if (assertions && assertions.length > 0) {
-          await invokeProcWrite('sp_api_test_assertions_insert_batch', {
-            i_api_test_suite_id: suiteId,
-            i_assertions: JSON.stringify(assertions),
-            i_created_by: 'runner',
-          });
-        }
-
-        // Update suite with final status and counters
-        await invokeProcWrite('sp_api_test_suites_update', {
-          i_id: suiteId,
-          i_status: suiteStatus,
-          i_total_assertions: (suite.total_assertions as number) ?? 0,
-          i_passed_assertions: (suite.passed_assertions as number) ?? 0,
-          i_failed_assertions: (suite.failed_assertions as number) ?? 0,
-          i_skipped_assertions: (suite.skipped_assertions as number) ?? 0,
-          i_duration_ms: (suite.duration_ms as number) ?? null,
-          i_error_message: (suite.error_message as string) ?? null,
-          i_updated_by: 'runner',
-        });
-      }
-
-      return NextResponse.json({ success: true, suites_processed: suites.length });
-    } catch (err) {
-      console.error('API test result callback error:', err);
+      console.error('API test result callback error:', { execution_id: executionId, correlation_id: correlationId, error: err });
       return NextResponse.json({ error: 'Failed to record API test results' }, { status: 500 });
     }
   }
