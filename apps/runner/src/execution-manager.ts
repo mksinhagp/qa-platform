@@ -7,6 +7,11 @@
  *    request to the dashboard via callback, and poll for an operator decision.
  *  - On approved: the next step (submit) proceeds.
  *  - On rejected / timed_out: remaining steps are recorded as skipped_by_approval.
+ *
+ * Phase 8 additions:
+ *  - LLM post-step: after API tests complete, run failure summarization via Ollama.
+ *    Fires only when (a) Ollama is configured, (b) execution has failed/friction steps.
+ *    Non-blocking — errors are logged but do not affect execution status.
  */
 
 import path from 'node:path';
@@ -25,6 +30,13 @@ import { getPersonaById, V1_PERSONAS } from '@qa-platform/personas';
 import { Logger } from '@qa-platform/shared-types';
 import { runApiTests, type ApiTestConfig, type ApiSuiteResult, type ApiEndpointConfig } from '@qa-platform/api-testing';
 import { loadSiteRules } from '@qa-platform/rules';
+import {
+  OllamaClient,
+  summarizeFailure,
+  type FailureSummarizationInput,
+  type StepSummaryInput,
+  type FrictionSignalInput,
+} from '@qa-platform/llm';
 
 const logger = new Logger('execution-manager');
 
@@ -759,6 +771,155 @@ function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// ─── Phase 8: LLM Failure Summarization Post-Step ────────────────────────────
+
+/**
+ * Lazily-initialized Ollama client. Returns null when OLLAMA_BASE_URL is not
+ * set so the LLM post-step is silently skipped in environments without Ollama.
+ */
+function getOllamaClient(): OllamaClient | null {
+  const baseUrl = process.env['OLLAMA_BASE_URL'];
+  if (!baseUrl) return null;
+  return new OllamaClient({ base_url: baseUrl });
+}
+
+/**
+ * Runs the LLM failure-summarization post-step after execution completes.
+ *
+ * Fires only when:
+ *  - OLLAMA_BASE_URL is configured.
+ *  - The execution has at least one failed/error step OR friction_score > 0.
+ *  - The execution status is not aborted/skipped_by_approval.
+ *
+ * Non-blocking: errors are logged at warn level and never surface to the caller.
+ * Results are sent back to the dashboard via the lllm_analysis callback type.
+ */
+async function runLlmPostStep(
+  ex: ExecutionRequest,
+  result: ExecutionResult,
+  persona: Persona,
+  siteName: string,
+  correlationId: string,
+): Promise<void> {
+  const client = getOllamaClient();
+  if (!client) {
+    logger.info(
+      `Execution ${ex.execution_id}: OLLAMA_BASE_URL not set — skipping LLM post-step`,
+      undefined,
+      correlationId,
+    );
+    return;
+  }
+
+  // Only analyse if there were actual failures or meaningful friction
+  // StepStatus does not include 'error' — use string cast for future-proofing
+  const hasFailures = result.steps.some(
+    (s) => s.status === 'failed' || (s.status as string) === 'error',
+  );
+  const hasFriction = result.friction_score > 0.1;
+  if (!hasFailures && !hasFriction) {
+    logger.info(
+      `Execution ${ex.execution_id}: no failures or notable friction — skipping LLM summarization`,
+      undefined,
+      correlationId,
+    );
+    return;
+  }
+
+  logger.info(
+    `Execution ${ex.execution_id}: running LLM failure summarization`,
+    undefined,
+    correlationId,
+  );
+
+  const steps: StepSummaryInput[] = result.steps.map((s) => ({
+    step_name: s.step_name,
+    status: s.status as StepSummaryInput['status'],
+    error_message: s.error_message ?? null,
+    duration_ms: s.duration_ms ?? null,
+  }));
+
+  // Aggregate friction signals by type (count occurrences across steps)
+  const signalCounts = new Map<string, number>();
+  const signalDetails = new Map<string, string>();
+  for (const f of result.friction_signals) {
+    const key = f.signal_type;
+    signalCounts.set(key, (signalCounts.get(key) ?? 0) + 1);
+    if (f.step_name && !signalDetails.has(key)) {
+      signalDetails.set(key, f.step_name);
+    }
+  }
+  const frictionSignals: FrictionSignalInput[] = Array.from(signalCounts.entries()).map(([type, count]) => ({
+    signal_type: type,
+    count,
+    details: signalDetails.get(type) ?? null,
+  }));
+
+  const input: FailureSummarizationInput = {
+    execution_id: ex.execution_id,
+    persona_id: ex.persona_id,
+    persona_display_name: persona.display_name,
+    browser: ex.browser,
+    flow_name: ex.flow_name,
+    site_name: siteName,
+    overall_status: result.status,
+    friction_score: result.friction_score,
+    steps,
+    friction_signals: frictionSignals,
+  };
+
+  const summaryResult = await summarizeFailure(client, input);
+
+  logger.info(
+    `Execution ${ex.execution_id}: LLM summarization complete — severity=${summaryResult.summary.severity} model=${summaryResult.model_used} duration=${summaryResult.llm_call.total_duration_ms}ms`,
+    undefined,
+    correlationId,
+  );
+
+  // Ship results back to the dashboard via the existing callback endpoint
+  await sendLlmAnalysisCallback(ex, summaryResult, correlationId);
+}
+
+/**
+ * Sends the LLM analysis result to the dashboard callback endpoint.
+ * Uses the same retry wrapper as other callback types.
+ */
+async function sendLlmAnalysisCallback(
+  ex: ExecutionRequest,
+  summaryResult: Awaited<ReturnType<typeof summarizeFailure>>,
+  correlationId: string,
+): Promise<void> {
+  const body = {
+    type: 'llm_analysis_result',
+    execution_id: ex.execution_id,
+    task_type: 'failure_summarization',
+    model_used: summaryResult.model_used,
+    status: summaryResult.llm_call.success ? 'completed' : 'error',
+    result_json: summaryResult.llm_call.success
+      ? {
+          executive_summary: summaryResult.summary.executive_summary,
+          issues: summaryResult.summary.issues,
+          recommendations: summaryResult.summary.recommendations,
+          persona_notes: summaryResult.summary.persona_notes,
+          severity: summaryResult.summary.severity,
+        }
+      : null,
+    error_message: summaryResult.llm_call.error ?? null,
+    prompt_tokens: summaryResult.llm_call.prompt_tokens,
+    completion_tokens: summaryResult.llm_call.completion_tokens,
+    duration_ms: summaryResult.llm_call.total_duration_ms,
+  };
+
+  await postCallbackWithRetry(
+    ex.callback_url,
+    ex.callback_token,
+    JSON.stringify(body),
+    ex.execution_id,
+    correlationId,
+    'LLM analysis callback',
+  );
+}
+
 // ─── ExecutionManager ─────────────────────────────────────────────────────────
 
 export class ExecutionManager {
@@ -880,6 +1041,23 @@ export class ExecutionManager {
         } catch (apiErr) {
           logger.warn(
             `Execution ${ex.execution_id}: API test post-step error (non-fatal): ${String(apiErr)}`,
+            undefined,
+            this._correlationId,
+          );
+        }
+      }
+
+      // Phase 8: LLM failure summarization post-step.
+      // Only runs for non-aborted/non-skipped executions where Ollama is configured.
+      // Non-blocking: errors do not affect execution status or callback delivery.
+      if (result.status !== 'aborted' && result.status !== 'skipped_by_approval') {
+        const persona = lookupPersona(ex.persona_id);
+        const siteName = ex.site_id;
+        try {
+          await runLlmPostStep(ex, result, persona, siteName, this._correlationId);
+        } catch (llmErr) {
+          logger.warn(
+            `Execution ${ex.execution_id}: LLM post-step error (non-fatal): ${String(llmErr)}`,
             undefined,
             this._correlationId,
           );

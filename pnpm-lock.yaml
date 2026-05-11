@@ -41,6 +41,12 @@ importers:
       '@qa-platform/email':
         specifier: workspace:*
         version: link:../../packages/email
+      '@qa-platform/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+      '@qa-platform/shared-types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
       '@qa-platform/vault':
         specifier: workspace:*
         version: link:../../packages/vault
@@ -120,6 +126,9 @@ importers:
       '@qa-platform/approvals':
         specifier: workspace:*
         version: link:../../packages/approvals
+      '@qa-platform/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
       '@qa-platform/personas':
         specifier: workspace:*
         version: link:../../packages/personas
@@ -262,6 +271,19 @@ importers:
       '@types/mailparser':
         specifier: ^3.4.4
         version: 3.4.6
+      '@types/node':
+        specifier: ^20.10.0
+        version: 20.19.40
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+
+  packages/llm:
+    dependencies:
+      '@qa-platform/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
+    devDependencies:
       '@types/node':
         specifier: ^20.10.0
         version: 20.19.40

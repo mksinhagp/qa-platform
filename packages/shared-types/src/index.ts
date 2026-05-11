@@ -28,5 +28,8 @@ export * from "./artifact.types";
 // Browser types
 export * from "./browser.types";
 
+// Report types
+export * from "./report.types";
+
 // Logging utilities
 export * from "./logging";

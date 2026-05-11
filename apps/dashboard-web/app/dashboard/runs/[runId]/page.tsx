@@ -30,6 +30,10 @@ import {
   type AdminTestSuiteRecord,
   type AdminTestAssertionRecord,
 } from '@/app/actions/adminTestResults';
+import {
+  listLlmAnalysisByExecution,
+  type LlmAnalysisRecord,
+} from '@/app/actions/llmAnalysis';
 import { Button } from '@/components/ui/button';
 import {
   ArrowLeft,
@@ -47,6 +51,8 @@ import {
   Link2,
   Zap,
   Shield,
+  BrainCircuit,
+  FileText,
 } from 'lucide-react';
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
@@ -191,6 +197,9 @@ export default function RunDetailPage({
   useEffect(() => {
     expandedAdminSuiteRef.current = expandedAdminSuite;
   }, [expandedAdminSuite]);
+  // Phase 8: LLM analysis results
+  const [llmAnalysisRecords, setLlmAnalysisRecords] = useState<LlmAnalysisRecord[]>([]);
+  const [expandedLlmRecord, setExpandedLlmRecord] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -297,6 +306,17 @@ export default function RunDetailPage({
           });
         }
       }
+      // Phase 8: Load LLM analysis records for all executions
+      const allLlmRecords: LlmAnalysisRecord[] = [];
+      await Promise.all(
+        loadedExecs.map(async exec => {
+          const llmRes = await listLlmAnalysisByExecution(exec.id);
+          if (llmRes.success && llmRes.records) {
+            allLlmRecords.push(...llmRes.records);
+          }
+        }),
+      );
+      setLlmAnalysisRecords(allLlmRecords);
     } catch {
       setError('An error occurred while loading run');
     } finally {
@@ -462,6 +482,15 @@ export default function RunDetailPage({
                     <StatusBadge status={run.status} />
                     {ACTIVE_STATUSES.includes(run.status) && (
                       <span className="text-xs text-zinc-400 animate-pulse">Auto-refreshing…</span>
+                    )}
+                    {run.status === 'completed' && (
+                      <Link
+                        href={`/dashboard/runs/${runId}/report`}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-purple-50 text-purple-700 text-xs font-medium rounded-lg hover:bg-purple-100"
+                      >
+                        <FileText className="w-3.5 h-3.5" />
+                        Narrative Report
+                      </Link>
                     )}
                   </div>
                   {run.description && (
@@ -850,6 +879,136 @@ export default function RunDetailPage({
                                 </div>
                               );
                             })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Phase 8: LLM Analysis panel */}
+            {llmAnalysisRecords.length > 0 && (
+              <div className="bg-white rounded-lg border border-zinc-200 overflow-hidden">
+                <div className="px-4 py-3 border-b border-zinc-200 bg-violet-50 flex items-center gap-2">
+                  <BrainCircuit className="w-4 h-4 text-violet-500" />
+                  <h2 className="text-sm font-semibold text-violet-700">
+                    AI Analysis ({llmAnalysisRecords.length} record{llmAnalysisRecords.length !== 1 ? 's' : ''})
+                  </h2>
+                  <span className="ml-auto text-xs text-violet-400 italic">Advisory — AI-generated, not authoritative</span>
+                </div>
+                <div className="divide-y divide-zinc-100">
+                  {llmAnalysisRecords.map(record => {
+                    const isExpanded = expandedLlmRecord === record.id;
+                    const summary = record.result_json as {
+                      executive_summary?: string;
+                      issues?: string[];
+                      recommendations?: string[];
+                      persona_notes?: string;
+                      severity?: string;
+                    } | null;
+
+                    const severityColor =
+                      summary?.severity === 'critical' ? 'text-red-700 bg-red-50' :
+                      summary?.severity === 'high' ? 'text-orange-700 bg-orange-50' :
+                      summary?.severity === 'medium' ? 'text-amber-700 bg-amber-50' :
+                      summary?.severity === 'low' ? 'text-green-700 bg-green-50' :
+                      'text-zinc-500 bg-zinc-100';
+
+                    const taskLabel = record.task_type === 'failure_summarization'
+                      ? 'Failure Summary'
+                      : 'Selector Healing';
+
+                    return (
+                      <div key={record.id}>
+                        <button
+                          onClick={() => setExpandedLlmRecord(isExpanded ? null : record.id)}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-zinc-50 transition-colors"
+                        >
+                          {isExpanded ? <ChevronDown className="w-4 h-4 text-zinc-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-zinc-400 shrink-0" />}
+                          <BrainCircuit className="w-4 h-4 text-violet-400 shrink-0" />
+                          <span className="flex-1 text-xs font-medium text-zinc-900">
+                            {taskLabel}
+                            <span className="ml-2 text-zinc-400 font-normal">via {record.model_used}</span>
+                          </span>
+                          {summary?.severity && (
+                            <span className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full ${severityColor}`}>
+                              {summary.severity}
+                            </span>
+                          )}
+                          <span className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full ml-2 ${
+                            record.status === 'completed' ? 'text-green-700 bg-green-50' :
+                            record.status === 'error' ? 'text-red-700 bg-red-50' :
+                            record.status === 'skipped' ? 'text-zinc-500 bg-zinc-100' :
+                            'text-blue-700 bg-blue-50'
+                          }`}>
+                            {record.status}
+                          </span>
+                          {record.duration_ms !== null && (
+                            <span className="text-xs text-zinc-400 shrink-0 ml-2">
+                              {record.duration_ms < 1000
+                                ? `${record.duration_ms}ms`
+                                : `${(record.duration_ms / 1000).toFixed(1)}s`}
+                            </span>
+                          )}
+                        </button>
+
+                        {isExpanded && (
+                          <div className="px-10 pb-4 space-y-3">
+                            {record.error_message && (
+                              <p className="text-xs text-red-600">{record.error_message}</p>
+                            )}
+                            {record.status === 'error' && !record.error_message && (
+                              <p className="text-xs text-zinc-400">Analysis failed — no details available.</p>
+                            )}
+                            {summary && (
+                              <div className="space-y-3">
+                                {summary.executive_summary && (
+                                  <div>
+                                    <p className="text-xs font-semibold text-zinc-600 mb-1">Executive Summary</p>
+                                    <p className="text-xs text-zinc-700 leading-relaxed">{summary.executive_summary}</p>
+                                  </div>
+                                )}
+                                {summary.issues && summary.issues.length > 0 && (
+                                  <div>
+                                    <p className="text-xs font-semibold text-zinc-600 mb-1">Issues Found</p>
+                                    <ul className="space-y-0.5">
+                                      {summary.issues.map((issue, i) => (
+                                        <li key={i} className="text-xs text-red-700 flex items-start gap-1.5">
+                                          <XCircle className="w-3 h-3 shrink-0 mt-0.5" />
+                                          {issue}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+                                {summary.recommendations && summary.recommendations.length > 0 && (
+                                  <div>
+                                    <p className="text-xs font-semibold text-zinc-600 mb-1">Recommendations</p>
+                                    <ul className="space-y-0.5">
+                                      {summary.recommendations.map((rec, i) => (
+                                        <li key={i} className="text-xs text-zinc-700 flex items-start gap-1.5">
+                                          <CheckCircle className="w-3 h-3 shrink-0 mt-0.5 text-zinc-400" />
+                                          {rec}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+                                {summary.persona_notes && (
+                                  <div>
+                                    <p className="text-xs font-semibold text-zinc-600 mb-1">Persona Notes</p>
+                                    <p className="text-xs text-zinc-600 italic">{summary.persona_notes}</p>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {record.prompt_tokens !== null && (
+                              <p className="text-xs text-zinc-400">
+                                Tokens: {record.prompt_tokens} prompt + {record.completion_tokens ?? 0} completion
+                              </p>
+                            )}
                           </div>
                         )}
                       </div>

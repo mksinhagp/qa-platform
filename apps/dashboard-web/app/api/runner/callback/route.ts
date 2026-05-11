@@ -1,7 +1,7 @@
 /**
  * POST /api/runner/callback
  *
- * Three payload types (differentiated by `type` field):
+ * Four payload types (differentiated by `type` field):
  *
  *  1. "execution_result" — the runner finished an execution and is reporting results.
  *     Writes step results, friction signals, and final status back to the DB.
@@ -13,6 +13,9 @@
  *  3. "api_test_result" — the runner completed API validation post-step and is
  *     reporting suite/assertion results for storage in the DB (Phase 6).
  *
+ *  4. "llm_analysis_result" — the runner completed LLM failure summarization and is
+ *     reporting the structured summary for storage in the DB (Phase 8).
+ *
  * Authentication: one-time callback token validated against the stored token
  *   in the run_executions table (i_callback_token param).
  */
@@ -20,6 +23,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
 import { invokeProc, invokeProcWrite } from '@qa-platform/db';
+
+// ─── Zod schema for the Phase 8 llm_analysis_result payload ──────────────────
+
+const LlmAnalysisResultPayloadSchema = z.object({
+  type: z.literal('llm_analysis_result'),
+  execution_id: z.number().int().positive(),
+  task_type: z.enum(['selector_healing', 'failure_summarization']),
+  model_used: z.string().min(1),
+  status: z.enum(['pending', 'completed', 'error', 'skipped']),
+  result_json: z.record(z.unknown()).nullish(),
+  error_message: z.string().nullish(),
+  prompt_tokens: z.number().int().nonnegative().nullish(),
+  completion_tokens: z.number().int().nonnegative().nullish(),
+  duration_ms: z.number().int().nonnegative().nullish(),
+});
 
 // ─── Zod schema for the Phase 6 api_test_result payload ───────────────────────
 // Validates the full shape up-front so downstream procs receive well-typed
@@ -301,6 +319,59 @@ export async function POST(request: NextRequest) {
       }
       console.error('Admin test result callback error:', { execution_id: executionId, correlation_id: correlationId, error: err });
       return NextResponse.json({ error: 'Failed to record admin test results' }, { status: 500 });
+    }
+  }
+
+  // ─── Handle LLM analysis result (Phase 8) ────────────────────────────────
+  if (type === 'llm_analysis_result') {
+    const parsed = LlmAnalysisResultPayloadSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid llm_analysis_result payload', details: parsed.error.flatten() },
+        { status: 400 },
+      );
+    }
+    const {
+      execution_id: executionId,
+      task_type,
+      model_used,
+      status: analysisStatus,
+      result_json,
+      error_message,
+      prompt_tokens,
+      completion_tokens,
+      duration_ms,
+    } = parsed.data;
+
+    try {
+      // Validate token first via a read-only proc call
+      const tokenRows = await invokeProc('sp_run_executions_validate_token', {
+        i_id: executionId,
+        i_callback_token: token,
+      });
+      type TokenRow = { o_valid: boolean };
+      const valid = (tokenRows as TokenRow[])[0]?.o_valid === true;
+      if (!valid) {
+        return NextResponse.json({ error: 'Invalid callback token' }, { status: 401 });
+      }
+
+      await invokeProcWrite('sp_llm_analysis_upsert', {
+        i_run_execution_id: executionId,
+        i_task_type: task_type,
+        i_model_used: model_used,
+        i_status: analysisStatus,
+        i_result_json: result_json ? JSON.stringify(result_json) : null,
+        i_error_message: error_message ?? null,
+        i_prompt_tokens: prompt_tokens ?? null,
+        i_completion_tokens: completion_tokens ?? null,
+        i_duration_ms: duration_ms ?? null,
+        i_updated_by: 'runner',
+      });
+
+      return NextResponse.json({ success: true });
+    } catch (err) {
+      console.error('LLM analysis result callback error:', { execution_id: executionId, correlation_id: correlationId, error: err });
+      return NextResponse.json({ error: 'Failed to record LLM analysis result' }, { status: 500 });
     }
   }
 

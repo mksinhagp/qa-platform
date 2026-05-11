@@ -47,6 +47,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
             </div>
             <div className="flex items-center">
               <Link
+                href="/dashboard/settings/llm-benchmark"
+                className="flex items-center px-4 border-b-2 border-transparent hover:border-zinc-300 text-zinc-700 hover:text-zinc-900"
+              >
+                AI Models
+              </Link>
+              <Link
                 href="/dashboard/settings/operators"
                 className="flex items-center px-4 border-b-2 border-transparent hover:border-zinc-300 text-zinc-700 hover:text-zinc-900"
               >

@@ -11,6 +11,7 @@ export default defineConfig({
       '@qa-platform/rules': path.resolve(__dirname, 'packages/rules/src/index.ts'),
       '@qa-platform/shared-types': path.resolve(__dirname, 'packages/shared-types/src/index.ts'),
       '@qa-platform/api-testing': path.resolve(__dirname, 'packages/api-testing/src/index.ts'),
+      '@qa-platform/llm': path.resolve(__dirname, 'packages/llm/src/index.ts'),
     },
   },
   test: {

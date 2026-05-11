@@ -3183,3 +3183,149 @@ When `#root` is missing, the optional chain produces `undefined`, the `??` fallb
 
 ---
 
+## May 11, 2026 — Phase 9: Reporting and Narrative Layer
+
+**Date**: 2026-05-11
+**Status**: Complete
+**Master Plan Reference**: §10 — Reporting (Two-Layer Report)
+
+### Objective
+
+Implement a two-layer reporting system with narrative summaries for non-technical stakeholders and technical drill-down for developers. This completes the master plan's reporting vision.
+
+### Work Completed
+
+#### 1. Database Layer (Stored Procedures)
+
+Created 6 new stored procedures for reporting data aggregation:
+
+- **0117_sp_report_persona_summary.sql**: Aggregates per-persona performance data including completion status, duration, friction score, and top 3 issues per persona
+- **0118_sp_report_accessibility_summary.sql**: Aggregates accessibility results across all executions (axe-core severity counts, keyboard-nav pass rate, contrast pass rate, reflow pass rate)
+- **0119_sp_report_issues_deduplicated.sql**: Deduplicates and ranks issues across executions using normalized error messages, with severity classification (critical/high/medium/low) and category assignment
+- **0120_sp_report_friction_signals.sql**: Aggregates friction telemetry signals by execution and signal type with occurrence counts and example metadata
+- **0121_sp_report_execution_detail.sql**: Returns detailed execution data including steps, artifacts, and related test results for technical drill-down
+- **0122_sp_report_run_summary.sql**: Provides high-level run summary with site/environment context and overall statistics
+
+**Major Decision**: Accessibility data is stored in `run_steps.details` JSONB with structure `{ "accessibility": { "axe_core": {...}, "keyboard_nav": {...}, "contrast": {...}, "reflow": {...} } }`. The stored procedures extract and aggregate this data without requiring a separate accessibility table.
+
+**Major Decision**: Issue deduplication uses normalization (removing timestamps, IDs, variable values) to group similar errors. Severity is determined by step type and error content (navigation = critical, assertion = high, etc.).
+
+#### 2. Type System
+
+Created `packages/shared-types/src/report.types.ts` with TypeScript interfaces:
+
+- `PersonaSummary`: Per-persona performance metrics
+- `AccessibilitySummary`: Aggregated accessibility scores
+- `DeduplicatedIssue`: Deduplicated issue with severity and category
+- `FrictionSignalAggregate`: Friction telemetry aggregation
+- `ExecutionDetail`: Detailed execution data for drill-down
+- `RunSummary`: High-level run context
+- `NarrativeReport`: Complete report structure combining all above
+
+Exported from `packages/shared-types/src/index.ts`.
+
+#### 3. Server Actions
+
+Created `apps/dashboard-web/app/actions/reports.ts` with action functions:
+
+- `getRunSummary()`: Fetches run-level summary
+- `getPersonaSummaries()`: Fetches per-persona performance data
+- `getAccessibilitySummary()`: Fetches accessibility aggregation
+- `getDeduplicatedIssues()`: Fetches deduplicated, ranked issues
+- `getFrictionSignals()`: Fetches friction telemetry
+- `getExecutionDetail()`: Fetches detailed execution data
+- `getNarrativeReport()`: Orchestrates fetching all report data in parallel
+- `getLlmAnalysisForRun()`: Fetches LLM failure analysis for advisory display
+
+All actions follow the established pattern with `ReportActionResult<T>` return type and proper error handling.
+
+#### 4. Narrative Report UI
+
+Created `apps/dashboard-web/app/dashboard/runs/[runId]/report/page.tsx` with:
+
+**Narrative Layer Components**:
+- `SummaryCard`: Display metric with icon and color
+- `PersonaSummaryCard`: Per-persona performance with pass rate, execution counts, friction score, duration, and top issues
+- `AccessibilityScorecard`: WCAG 2.2 AA compliance display with axe-core severity breakdown (critical/serious/moderate/minor) and pass rates for keyboard nav, contrast, and reflow
+- `IssuesList`: Severity-ranked issue list with occurrence counts, affected personas, first occurrence step, and expandable error examples
+- `LlmAnalysisSection`: Displays LLM-generated failure explanations with "Advisory Only" badge when available
+
+**Technical Drill-Down Components**:
+- `TechnicalDrillDown`: Shows execution metadata, steps timeline with status indicators, and artifact list
+
+**Page Structure**:
+- Header with run name, site/environment, status badge, and "Export PDF" button (placeholder)
+- Run summary cards (total executions, successful, failed, avg friction)
+- Two-column layout: Persona performance + Accessibility scorecard
+- Issues analysis section
+- LLM analysis section (when available)
+- Footer with generation timestamp and run duration
+
+**Integration**: Added "Narrative Report" link button in the existing run detail page (`apps/dashboard-web/app/dashboard/runs/[runId]/page.tsx`) that appears when run status is 'completed'.
+
+#### 5. Testing
+
+Created `apps/dashboard-web/app/actions/reports.test.ts` with unit tests for all report action functions. Tests validate:
+- Function signatures and return types
+- Success/error handling for valid and invalid inputs
+- Data structure validation when data is returned
+- Graceful error handling when database is not available
+
+**Note**: Full integration tests require database setup. Current tests validate structure and error handling.
+
+### Major Decisions
+
+1. **Two-Layer Architecture**: Narrative report focuses on aggregated, executive-summary data for stakeholders. Technical drill-down remains in the existing run detail page which already provides step-by-step execution details, artifacts, and raw data.
+
+2. **Accessibility Data Storage**: Instead of creating separate accessibility tables, accessibility check results are stored in `run_steps.details` JSONB. This keeps the schema simple while allowing flexible accessibility data structures. Stored procedures extract and aggregate this data at query time.
+
+3. **Issue Deduplication Strategy**: Normalization removes timestamps, IDs, and variable values from error messages before grouping. Severity is inferred from step type (navigation = critical, assertion = high) and error content (security = critical, accessibility = high). This provides automatic severity classification without manual labeling.
+
+4. **LLM Integration**: LLM failure explanations are displayed as "Advisory Only" with a purple badge to emphasize they are not authoritative. This aligns with the master plan's principle that deterministic execution is the source of truth, with LLM as a bounded helper.
+
+5. **MP4 Walkthrough Deferred**: Master plan §10.1 mentions generated MP4 walkthroughs (5-30s clips from traces) for sharing with non-technical stakeholders. This requires FFmpeg integration for video processing and was deferred to a future phase as it's a nice-to-have feature not critical for v1.
+
+6. **Export PDF Placeholder**: The "Export PDF" button is a placeholder. Actual PDF generation would require a library like jsPDF or puppeteer and is deferred.
+
+### Files Created
+
+- `db/procs/0117_sp_report_persona_summary.sql`
+- `db/procs/0118_sp_report_accessibility_summary.sql`
+- `db/procs/0119_sp_report_issues_deduplicated.sql`
+- `db/procs/0120_sp_report_friction_signals.sql`
+- `db/procs/0121_sp_report_execution_detail.sql`
+- `db/procs/0122_sp_report_run_summary.sql`
+- `packages/shared-types/src/report.types.ts`
+- `apps/dashboard-web/app/actions/reports.ts`
+- `apps/dashboard-web/app/actions/reports.test.ts`
+- `apps/dashboard-web/app/dashboard/runs/[runId]/report/page.tsx`
+
+### Files Modified
+
+- `packages/shared-types/src/index.ts` — added report types export
+- `apps/dashboard-web/app/dashboard/runs/[runId]/page.tsx` — added narrative report link button
+
+### Known Limitations
+
+1. **Accessibility Data**: The accessibility stored procedures assume a specific JSONB structure in `run_steps.details`. If accessibility checks are not being stored in this format, the accessibility summary will show zeros. This should be addressed when accessibility checking is fully implemented in the runner.
+
+2. **Issue Deduplication**: The normalization logic is basic (removes timestamps, IDs, numbers). More sophisticated fuzzy matching could be added in the future for better deduplication.
+
+3. **Technical Drill-Down**: The narrative report includes a technical drill-down component, but it's not fully integrated with execution selection. Users can view technical details from the existing run detail page which provides comprehensive drill-down.
+
+### Next Steps
+
+Phase 9 completes the core reporting functionality defined in the master plan §10. The platform now has:
+- Full test execution (Phases 0-7)
+- LLM analysis infrastructure (Phase 8, deferred model selection)
+- Narrative reporting for stakeholders (Phase 9)
+
+Future enhancements could include:
+- MP4 walkthrough generation with FFmpeg
+- PDF export functionality
+- More sophisticated issue deduplication
+- Enhanced accessibility data collection in the runner
+- Custom report templates and scheduling
+
+---
+
