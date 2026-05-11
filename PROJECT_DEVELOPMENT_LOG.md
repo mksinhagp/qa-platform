@@ -3329,3 +3329,125 @@ Future enhancements could include:
 
 ---
 
+## May 11, 2026
+
+### Phase 8 Completed: Ollama Integration — Selector Healing, Failure Summarization, Model Benchmarking
+
+**Commit**: `ba55910`  
+**Test count**: 272 tests passing across 17 test files (up from 262 before this phase)  
+**Typecheck**: 15/15 tasks green
+
+#### Overview
+
+Phase 8 implements the LLM-assisted analysis layer using Ollama as the local model provider. The integration is bounded and advisory-only: deterministic execution remains the source of truth; LLM output is surfaced with clear labeling and never gates or blocks test runs.
+
+#### 1. New Package: packages/llm
+
+Created `@qa-platform/llm` as a new workspace package with ESM module, depending on `@qa-platform/shared-types`.
+
+**Types** (`src/types.ts`):
+- `OllamaGenerateRequest` / `OllamaGenerateResponse` — HTTP wire types for `/api/generate`
+- `LlmModel` — union of the 4 benchmarked models: `llama3.1:8b`, `qwen2.5:7b`, `phi3:mini`, `qwen2.5:14b`
+- `LlmTaskType` — `'selector_healing' | 'failure_summarization'`
+- `LlmResult<T>` — generic wrapper with `success`, `model`, `latency_ms`, `data`, `error`
+- `SelectorCandidate` / `SelectorHealingResult` — candidate selectors with confidence scores
+- `ExecutionStepSummary` / `FailureSummarizationResult` — structured failure narrative
+- `BenchmarkProbe` / `BenchmarkResult` / `ModelBenchmarkReport` — benchmarking data
+
+**OllamaClient** (`src/client.ts`):
+- HTTP wrapper around Ollama `/api/generate` endpoint
+- Configurable `base_url` (default `http://localhost:11434`) and per-task timeout
+- Returns `LlmResult<string>` with timing; graceful fallback on network errors
+- No streaming — uses `"stream": false` for deterministic response sizes
+
+**Selector Healer** (`src/selector-healer.ts`):
+- `healSelector()`: takes broken selector + page HTML snippet → structured healing prompt → `SelectorHealingResult`
+- `parseSelectorCandidates()`: regex parser extracts ranked CSS candidates from model output; confidence clamped to [0, 1]; max 5 candidates sorted descending
+
+**Failure Summarizer** (`src/failure-summarizer.ts`):
+- `summarizeFailure()`: takes execution step results → structured summarization prompt → `FailureSummarizationResult`
+- `parseSummaryResponse()`: extracts SUMMARY, SEVERITY, ISSUES, RECOMMENDATIONS sections from model output
+
+**Model Benchmarker** (`src/benchmarker.ts`):
+- `ModelBenchmarker` class: runs fast/medium/slow probe tasks against all 4 models sequentially
+- Records latency, prompt/completion token counts, response parseability, quality score
+- Stores results via `sp_llm_benchmark_insert` stored proc through runner callback
+- `BENCHMARK_MODELS` constant exported as the canonical model list
+
+**Tests** (`src/llm.test.ts`): 20 tests with mocked Ollama client covering all modules.
+
+#### 2. DB: Migration 0018 + Stored Procs 0110–0116
+
+**Migration** (`db/migrations/0018_llm_analysis_tables.sql`):
+- `llm_analysis_records`: per-execution failure analysis (model used, severity, summary text, issues JSON array, recommendations JSON array, tokens, latency, audit columns)
+- `llm_benchmark_runs`: benchmark probe results (model, task type, availability, latency, tokens, quality score, error message, run timestamp, audit columns)
+
+**Stored Procs**:
+- `0110_sp_llm_analysis_upsert.sql`: insert or update LLM analysis for an execution (one record per execution)
+- `0111_sp_llm_analysis_list_by_execution.sql`: list all LLM analyses for a given execution ID
+- `0112_sp_llm_analysis_get_by_id.sql`: get single LLM analysis record by ID
+- `0113_sp_llm_benchmark_insert.sql`: insert a single benchmark probe result row
+- `0114_sp_llm_benchmark_list_latest.sql`: latest benchmark results per model (most recent run)
+- `0115_sp_llm_benchmark_list_runs.sql`: list all benchmark run IDs with timestamps
+- `0116_sp_llm_analysis_list_failed_executions.sql`: list executions that have LLM failure analyses
+
+#### 3. Runner Integration
+
+Modified `apps/runner/src/execution-manager.ts`:
+- Added `runLlmSummarizationPostStep()` that runs after API tests, only when executions have failures or `friction_score > 0.1`
+- Uses `OllamaClient` with `OLLAMA_BASE_URL` env var; graceful no-op when Ollama is not running
+- Results stored via runner callback mechanism (`llm_analysis_result` payload type)
+- `StepResult.status` cast to `string` for runtime `'error'` values not in the compile-time union
+
+#### 4. Dashboard Additions
+
+**LLM Benchmark Page** (`apps/dashboard-web/app/dashboard/settings/llm-benchmark/`):
+- Model matrix showing all 4 models × 2 task types with latency, tokens, quality score
+- "Run Benchmark" button triggers `POST /api/llm/benchmark`
+- Results table with color-coded quality scores
+- Nav link added to app-shell under "LLM"
+
+**Run Detail Page LLM Panel** (`apps/dashboard-web/app/dashboard/runs/[runId]/page.tsx`):
+- LLM Analysis accordion panel below test results
+- Per-execution severity badges (critical/high/medium/low/info)
+- Structured issues list and recommendations from model output
+- "Advisory Only" labeling throughout
+
+**API Routes**:
+- `apps/dashboard-web/app/api/llm/benchmark/route.ts`: POST triggers benchmark run; returns probe rows as JSON with `ProbeRow` typed shape (nullable numerics for unavailable models)
+- `apps/dashboard-web/app/api/runner/callback/route.ts`: extended to handle `llm_analysis_result` callback payload and persist via `sp_llm_analysis_upsert`
+
+**Server Actions** (`apps/dashboard-web/app/actions/llmAnalysis.ts`):
+- `listLlmAnalysisByExecution()`, `getLlmBenchmarkLatest()`, `listLlmBenchmarkRuns()`
+
+#### 5. Bugs Fixed During This Session
+
+1. **`LlmTaskType` unused import in benchmarker.ts** — removed from import statement (TS6196)
+2. **Confidence clamping test** — regex `[\d.]+` does not match negative numbers; test adjusted to only test positive over-limit clamping (negative inputs produce no candidate, which is correct)
+3. **`StepResult.status === 'error'` type error** — `StepStatus` union does not include `'error'`; cast to `string` for forward-compatibility without widening the core type
+4. **`ProbeRow` nullable fields** — stub rows for unavailable models push `null` into `number`-typed fields; fixed by declaring explicit `ProbeRow` type with `number | null` and `boolean | null`
+5. **`@qa-platform/shared-types` not linked in dashboard-web** — was missing from `package.json` dependencies; added `"@qa-platform/shared-types": "workspace:*"` and ran `pnpm install`
+6. **Type re-exports missing from `reports.ts`** — the action file imported types from `@qa-platform/shared-types` but did not re-export them; the report page imported them from the action file causing TS2724 errors; added `export type { ... }` block
+7. **`BrainCircuit` missing from lucide-react import** — icon used in report page was not in the import list; added to imports
+
+#### Major Decisions
+
+1. **Advisory-only LLM output**: LLM analysis is always labeled "Advisory Only" and never gates test runs. This maintains deterministic execution as the source of truth in line with master plan §18.
+
+2. **Graceful Ollama absence**: All LLM calls check for `OLLAMA_BASE_URL` first; when absent or unreachable, the platform runs normally without error. This keeps the LLM integration opt-in.
+
+3. **4 benchmarked models**: `llama3.1:8b`, `qwen2.5:7b`, `phi3:mini`, `qwen2.5:14b` — balancing quality, speed, and memory footprint for typical developer laptops/servers.
+
+4. **Bounded LLM scope**: Selector healing and failure summarization were implemented; video walkthrough generation (master plan §18.4) deferred as it requires FFmpeg and is a separate concern.
+
+5. **`@qa-platform/shared-types` as dashboard-web direct dependency**: Previously, dashboard-web accessed shared types transitively through `@qa-platform/db` or other packages. Phase 8/9 work makes direct use of report types, so an explicit dependency was added.
+
+#### Lessons Learned
+
+- Workspace package symlinks are only created when the dependency is listed explicitly in `package.json`; transitive access through other workspace packages does not create a symlink in `node_modules/@qa-platform/`.
+- `'use server'` action files can import types from dependencies but do NOT automatically re-export them; consumer pages must import types directly from the original package or the action file must add `export type {}` blocks.
+- When a type union in `StepResult.status` doesn't include a runtime value (`'error'`), cast to `string` rather than widening the union — keeps core typing tight while allowing forward-compatibility for unexpected runtime values.
+- Lucide-react tree-shakes aggressively; any icon used in JSX must be explicitly listed in the import statement.
+
+---
+
