@@ -140,7 +140,7 @@ async function runValidationPipeline(
           ? 'error'
           : 'not_found';
     } else {
-      finalStatus = result.passed ? 'delivered' : 'delivered'; // delivery = success, checks may fail
+      finalStatus = result.passed ? 'delivered' : 'checks_failed';
     }
 
     // Update the validation run record

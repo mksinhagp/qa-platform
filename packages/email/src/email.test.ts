@@ -19,7 +19,7 @@ import { runEmailAssertions } from './assertions.js';
 import { checkLinkReachability } from './linkChecker.js';
 import { waitForDelivery } from './delivery.js';
 import { validateEmail } from './validator.js';
-import type { ParsedEmail, ImapConfig, EmailAssertionSpec } from './types.js';
+import type { ParsedEmail, ImapConfig } from './types.js';
 
 // ─── Mock imap.ts so no real IMAP connections are made ───────────────────────
 

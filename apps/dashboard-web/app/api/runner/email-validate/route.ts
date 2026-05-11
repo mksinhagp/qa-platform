@@ -50,28 +50,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Validate the callback token against the stored token in run_executions
-  const execRows = await invokeProc('sp_run_executions_list', { i_run_id: -1 }).catch(() => []);
-  // Quick token check: look up the execution by id and verify token matches
-  // We reuse sp_run_executions_update_result's token validation by querying directly.
-  // For a lightweight check, query the callback_token from the table.
-  const tokenCheck = await invokeProc(
-    'sp_run_executions_list',
-    { i_run_id: -1 },
-  ).catch(() => []);
-
-  // Validate the token using a direct approach via sp_approvals_get_by_id_for_runner
-  // (We don't have a dedicated token-verify proc, so we validate via the DB)
-  // Instead, validate inline: fetch the execution and check token
-  const execCheck = await invokeProc('sp_run_executions_list', { i_run_id: -1 });
-
-  // Simple token validation: the callback_token column isn't directly queryable via
-  // a dedicated proc yet. We accept the token as a security control via the runner
-  // network boundary (internal Docker network). Log correlationId for audit.
-  // TODO Phase 9: add sp_run_executions_validate_token proc for strict validation.
-  void execRows;
-  void tokenCheck;
-  void execCheck;
+  // TODO Phase 9: add sp_run_executions_validate_token proc and validate `token`
+  // against run_executions.callback_token for the given executionId.
+  // Until then, security relies on the internal Docker network boundary.
+  // Log correlationId for audit trail — do not remove.
   void correlationId;
 
   // Fetch the inbox IMAP credentials
@@ -110,9 +92,15 @@ export async function POST(request: NextRequest) {
     password: imapPassword,
   };
 
-  const waitUntil = waitUntilStr
-    ? new Date(waitUntilStr)
-    : new Date(Date.now() + 5 * 60 * 1000);
+  let waitUntil: Date;
+  if (waitUntilStr) {
+    waitUntil = new Date(waitUntilStr);
+    if (isNaN(waitUntil.getTime())) {
+      return NextResponse.json({ error: 'Invalid wait_until timestamp' }, { status: 400 });
+    }
+  } else {
+    waitUntil = new Date(Date.now() + 5 * 60 * 1000);
+  }
 
   const spec = {
     subjectPattern: expectedSubjectPattern,

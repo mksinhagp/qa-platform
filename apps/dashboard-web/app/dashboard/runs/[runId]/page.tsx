@@ -1,6 +1,6 @@
 'use client';
 
-import { use, useCallback, useEffect, useState } from 'react';
+import { use, useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import AppShell from '@/components/app-shell';
 import {
@@ -154,6 +154,8 @@ export default function RunDetailPage({
   const [emailValRuns, setEmailValRuns] = useState<EmailValidationRunRecord[]>([]);
   const [emailValChecks, setEmailValChecks] = useState<Record<number, EmailValidationCheckRecord[]>>({});
   const [expandedEmailRun, setExpandedEmailRun] = useState<number | null>(null);
+  // Tracks in-flight check fetches to prevent duplicate concurrent requests
+  const fetchingChecks = useRef<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -192,6 +194,10 @@ export default function RunDetailPage({
           }),
         );
         setEmailValRuns(allEmailValRuns);
+        // Invalidate cached check results so they are re-fetched on next expand.
+        // Validation check rows can change status (pending → delivered/failed) during
+        // active polling, so stale cached checks must not persist across refreshes.
+        setEmailValChecks({});
       }
     } catch {
       setError('An error occurred while loading run');
@@ -220,10 +226,15 @@ export default function RunDetailPage({
       return;
     }
     setExpandedEmailRun(evRunId);
-    if (!emailValChecks[evRunId]) {
-      const checksRes = await listEmailValidationChecks(evRunId);
-      if (checksRes.success && checksRes.checks) {
-        setEmailValChecks(prev => ({ ...prev, [evRunId]: checksRes.checks! }));
+    if (!emailValChecks[evRunId] && !fetchingChecks.current.has(evRunId)) {
+      fetchingChecks.current.add(evRunId);
+      try {
+        const checksRes = await listEmailValidationChecks(evRunId);
+        if (checksRes.success && checksRes.checks) {
+          setEmailValChecks(prev => ({ ...prev, [evRunId]: checksRes.checks! }));
+        }
+      } finally {
+        fetchingChecks.current.delete(evRunId);
       }
     }
   }
@@ -494,9 +505,10 @@ export default function RunDetailPage({
                                       href={check.url_tested}
                                       target="_blank"
                                       rel="noopener noreferrer"
+                                      aria-label={`Open checked URL: ${check.url_tested}`}
                                       className="text-blue-500 hover:underline shrink-0"
                                     >
-                                      <Link2 className="w-3 h-3" />
+                                      <Link2 className="w-3 h-3" aria-hidden="true" />
                                     </a>
                                   )}
                                 </div>

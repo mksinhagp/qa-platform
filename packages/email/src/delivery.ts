@@ -32,9 +32,14 @@ export async function waitForDelivery(
   const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
   const folder = options.folder ?? 'INBOX';
 
-  const deadline = startedAt.getTime() + timeoutMs;
-  let pollCount = 0;
+  // Anchor the deadline to now, not startedAt.
+  // startedAt is the time the triggering flow action completed and is used only
+  // as the IMAP SINCE boundary inside fetchEmailByToken. The polling window
+  // should start from when waitForDelivery is actually called — otherwise any
+  // processing delay between flow completion and this call silently shrinks the window.
   const checkStartedAt = Date.now();
+  const deadline = checkStartedAt + timeoutMs;
+  let pollCount = 0;
 
   while (Date.now() < deadline) {
     pollCount++;
