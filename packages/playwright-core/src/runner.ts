@@ -62,6 +62,8 @@ export interface FlowDefinition {
 export interface ExecutionContext {
   baseUrl: string;
   testEmail?: string;
+  /** Admin password retrieved from the vault at execution time */
+  adminPassword?: string;
   correlationToken?: string;
   paymentProfile?: {
     number: string;

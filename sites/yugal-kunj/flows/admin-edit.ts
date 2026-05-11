@@ -30,7 +30,7 @@ export const adminEditFlow: FlowDefinition = {
         // Navigate to bookings list as the primary editable entity
         await runner.goto('https://ykportalnextgenqa.yugalkunj.org/#/admin/bookings');
         await runner.page.waitForFunction(
-          () => document.querySelector('#root')?.children.length ?? 0 > 0,
+          () => (document.querySelector('#root')?.children.length ?? 0) > 0,
           { timeout: 15000 },
         );
         runner.collector.setStep('navigate_to_editable_list');

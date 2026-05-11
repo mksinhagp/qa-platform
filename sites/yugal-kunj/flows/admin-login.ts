@@ -26,7 +26,7 @@ export const adminLoginFlow: FlowDefinition = {
       fn: async (runner: PersonaRunner) => {
         await runner.goto('https://ykportalnextgenqa.yugalkunj.org/#/login');
         await runner.page.waitForFunction(
-          () => document.querySelector('#root')?.children.length ?? 0 > 0,
+          () => (document.querySelector('#root')?.children.length ?? 0) > 0,
           { timeout: 15000 },
         );
         runner.collector.setStep('navigate_to_admin_login');
@@ -70,9 +70,15 @@ export const adminLoginFlow: FlowDefinition = {
       fn: async (runner: PersonaRunner) => {
         runner.collector.setStep('fill_admin_credentials');
 
-        // Use admin credentials from execution context or defaults
+        // Use admin credentials from execution context (populated from the vault)
         const adminEmail = runner.executionContext.testEmail ?? 'admin@yugalkunj.org';
-        const adminPassword = 'admin123';
+        const adminPassword = runner.executionContext.adminPassword;
+        if (!adminPassword) {
+          throw new Error(
+            'Admin password not provided in execution context — ' +
+            'configure the admin credential in the vault with key matching rules.admin.credential_key',
+          );
+        }
 
         await runner.type(
           'input[name="email"], input[name="username"], input[type="email"]',

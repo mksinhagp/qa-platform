@@ -27,7 +27,7 @@ export const registrationLookupFlow: FlowDefinition = {
       fn: async (runner: PersonaRunner) => {
         await runner.goto('https://ykportalnextgenqa.yugalkunj.org/#/admin/registrations');
         await runner.page.waitForFunction(
-          () => document.querySelector('#root')?.children.length ?? 0 > 0,
+          () => (document.querySelector('#root')?.children.length ?? 0) > 0,
           { timeout: 15000 },
         );
         runner.collector.setStep('navigate_to_registrations');

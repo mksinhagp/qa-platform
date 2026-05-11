@@ -26,7 +26,7 @@ export const browseFlow: FlowDefinition = {
         await runner.goto('https://ykportalnextgenqa.yugalkunj.org/#/camp/center');
         // Wait for the SPA shell to hydrate — the root div must have children
         await runner.page.waitForFunction(
-          () => document.querySelector('#root')?.children.length ?? 0 > 0,
+          () => (document.querySelector('#root')?.children.length ?? 0) > 0,
           { timeout: 15000 },
         );
         runner.collector.setStep('navigate_to_site');

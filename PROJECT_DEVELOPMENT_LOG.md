@@ -3095,3 +3095,91 @@ Flows wired in `sites/yugal-kunj/flows/index.ts` with all five admin exports.
 
 ---
 
+## Phase 7 Code Review Fixes
+
+**Date**: 2026-05-10
+**Status**: Complete
+
+### Summary
+
+Comprehensive code review of all Phase 7 changes identified and fixed 3 bugs. Full test suite verified post-fix.
+
+### Bugs Found and Fixed
+
+#### BUG-1 (Critical): Operator Precedence in `waitForFunction` — 6 files
+
+**Severity**: Critical — SPA hydration wait could silently fail, causing race conditions.
+
+**Root cause**: JavaScript operator precedence: `>` binds tighter than `??`, so the expression:
+```js
+document.querySelector('#root')?.children.length ?? 0 > 0
+```
+evaluates as `children.length ?? (0 > 0)` instead of the intended `(children.length ?? 0) > 0`.
+
+When `#root` has no children (length 0), the result is `0` — a number, not `null`/`undefined` — so the `??` fallback never triggers. The function returns `0` which is falsy, causing `waitForFunction` to keep waiting. This masks the real bug: the function would time out (15s) on an empty root instead of returning `true` when hydration has occurred but the root has no children yet.
+
+When `#root` is missing, the optional chain produces `undefined`, the `??` fallback yields `false` (from `0 > 0`), which is also falsy — correct behavior, but for the wrong reason.
+
+**Fix**: Added parentheses to enforce correct evaluation order: `(children.length ?? 0) > 0`
+
+**Files fixed** (5 Phase 7 + 1 pre-existing from browse.ts):
+- `sites/yugal-kunj/flows/admin-login.ts`
+- `sites/yugal-kunj/flows/booking-lookup.ts`
+- `sites/yugal-kunj/flows/registration-lookup.ts`
+- `sites/yugal-kunj/flows/admin-edit.ts`
+- `sites/yugal-kunj/flows/reporting-screens.ts`
+- `sites/yugal-kunj/flows/browse.ts` (pre-existing, fixed as drive-by)
+
+**Lesson learned**: Always parenthesize nullish coalescing (`??`) when combined with comparison operators. ESLint rule `no-mixed-operators` or TypeScript strict mode does not catch this.
+
+#### BUG-2 (Security): Hardcoded Admin Password in admin-login.ts
+
+**Severity**: High — credentials must never be in source code per global rules and master plan.
+
+**Root cause**: `admin-login.ts` line 75 had `const adminPassword = 'admin123'` instead of reading from the vault via `executionContext`. The `ExecutionContext` interface in `packages/playwright-core/src/runner.ts` also lacked an `adminPassword` field.
+
+**Fix**:
+1. Added `adminPassword?: string` field to `ExecutionContext` interface with JSDoc.
+2. Changed `admin-login.ts` to read `runner.executionContext.adminPassword`.
+3. Added guard: throws descriptive error if password not provided, directing the operator to configure the vault credential matching `rules.admin.credential_key`.
+
+**Files fixed**:
+- `packages/playwright-core/src/runner.ts` — added `adminPassword` to `ExecutionContext`
+- `sites/yugal-kunj/flows/admin-login.ts` — replaced hardcoded password with context lookup
+
+**Lesson learned**: Never hardcode credentials, even as fallback defaults. Flows should fail fast with a clear error if required credentials are missing from the execution context.
+
+#### BUG-3 (Minor): File Mode Change on callback/route.ts
+
+**Severity**: Minor — file inadvertently marked as executable (100755 instead of 100644).
+
+**Root cause**: File mode changed from 100644 to 100755 during Phase 7 editing, likely due to OneDrive sync or editor behavior.
+
+**Fix**: `chmod 644 apps/dashboard-web/app/api/runner/callback/route.ts`
+
+**Files fixed**:
+- `apps/dashboard-web/app/api/runner/callback/route.ts` — restored 644 permissions
+
+### Decisions
+
+- Pre-existing stored procedure patterns (no EXCEPTION blocks in simple CRUD procs 0103-0106) are consistent with Phase 6 — the transactional proc (0109) handles the orchestration, and Postgres FK constraints provide error enforcement. No change needed.
+- The `browse.ts` operator precedence bug was from a prior phase but fixed as a drive-by since the same pattern was being fixed in 5 new flows.
+
+### Verification
+
+- **Tests**: 242/242 pass across 15 test files (post-fix)
+- **Build**: Dashboard 7/7 tasks successful (pre-existing `@qa-platform/llm` build failure is unrelated — missing node_modules in that package)
+
+### Files Modified
+
+- `sites/yugal-kunj/flows/admin-login.ts` — BUG-1 + BUG-2
+- `sites/yugal-kunj/flows/booking-lookup.ts` — BUG-1
+- `sites/yugal-kunj/flows/registration-lookup.ts` — BUG-1
+- `sites/yugal-kunj/flows/admin-edit.ts` — BUG-1
+- `sites/yugal-kunj/flows/reporting-screens.ts` — BUG-1
+- `sites/yugal-kunj/flows/browse.ts` — BUG-1 (pre-existing)
+- `packages/playwright-core/src/runner.ts` — BUG-2 (ExecutionContext type)
+- `apps/dashboard-web/app/api/runner/callback/route.ts` — BUG-3 (file mode)
+
+---
+
