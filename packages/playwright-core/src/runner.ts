@@ -59,6 +59,36 @@ export interface FlowDefinition {
   }[];
 }
 
+export interface ExecutionContext {
+  baseUrl: string;
+  testEmail?: string;
+  correlationToken?: string;
+  paymentProfile?: {
+    number: string;
+    expiry: string;
+    cvv: string;
+    zip: string;
+    name: string;
+  };
+}
+
+/**
+ * State captured during browser flow execution, used by Phase 6 API cross-validation.
+ * Flow steps call runner.captureState() to record values observed in the browser.
+ */
+export interface BrowserCapturedState {
+  confirmation_id?: string;
+  email_used?: string;
+  name_used?: string;
+  phone_used?: string;
+  order_total?: string;
+  payment_status?: string;
+  session_name?: string;
+  attendee_count?: number;
+  confirmation_url?: string;
+  custom: Record<string, string>;
+}
+
 export class PersonaRunner {
   private _browser: Browser;
   private _persona: Persona;
@@ -67,10 +97,13 @@ export class PersonaRunner {
   private _cleanupFns: Array<() => void> = [];
   private _stepResults: StepResult[] = [];
   private _aborted = false;
+  private _capturedState: BrowserCapturedState = { custom: {} };
+  readonly executionContext: ExecutionContext;
 
-  constructor(browser: Browser, persona: Persona) {
+  constructor(browser: Browser, persona: Persona, executionContext: ExecutionContext) {
     this._browser = browser;
     this._persona = persona;
+    this.executionContext = executionContext;
   }
 
   get persona(): Persona {
@@ -234,6 +267,32 @@ export class PersonaRunner {
   /** Run accessibility check for the current page state */
   async checkAccessibility(): Promise<AccessibilityResult> {
     return runPersonaAccessibilityCheck(this._page!, this._persona);
+  }
+
+  /**
+   * Capture state observed during browser flow for Phase 6 API cross-validation.
+   * Call this from flow steps to record values (e.g., confirmation ID, email used).
+   */
+  captureState(key: keyof Omit<BrowserCapturedState, 'custom'>, value: string | number): void;
+  captureState(key: string, value: string): void;
+  captureState(key: string, value: string | number): void {
+    const knownKeys: Array<keyof Omit<BrowserCapturedState, 'custom'>> = [
+      'confirmation_id', 'email_used', 'name_used', 'phone_used',
+      'order_total', 'payment_status', 'session_name', 'attendee_count',
+      'confirmation_url',
+    ];
+
+    if (knownKeys.includes(key as keyof Omit<BrowserCapturedState, 'custom'>)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (this._capturedState as any)[key] = value;
+    } else {
+      this._capturedState.custom[key] = String(value);
+    }
+  }
+
+  /** Get all state captured during browser flow execution */
+  getCapturedState(): BrowserCapturedState {
+    return { ...this._capturedState, custom: { ...this._capturedState.custom } };
   }
 
   /** Clean up context and listeners */

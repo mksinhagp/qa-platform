@@ -18,6 +18,12 @@ import {
   type EmailValidationRunRecord,
   type EmailValidationCheckRecord,
 } from '@/app/actions/emailValidation';
+import {
+  listApiTestSuites,
+  listApiTestAssertions,
+  type ApiTestSuiteRecord,
+  type ApiTestAssertionRecord,
+} from '@/app/actions/apiTestResults';
 import { Button } from '@/components/ui/button';
 import {
   ArrowLeft,
@@ -33,6 +39,7 @@ import {
   ChevronDown,
   ChevronRight,
   Link2,
+  Zap,
 } from 'lucide-react';
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
@@ -156,6 +163,11 @@ export default function RunDetailPage({
   const [expandedEmailRun, setExpandedEmailRun] = useState<number | null>(null);
   // Tracks in-flight check fetches to prevent duplicate concurrent requests
   const fetchingChecks = useRef<Set<number>>(new Set());
+  // Phase 6: API test suite results
+  const [apiTestSuites, setApiTestSuites] = useState<ApiTestSuiteRecord[]>([]);
+  const [apiTestAssertions, setApiTestAssertions] = useState<Record<number, ApiTestAssertionRecord[]>>({});
+  const [expandedApiSuite, setExpandedApiSuite] = useState<number | null>(null);
+  const fetchingApiAssertions = useRef<Set<number>>(new Set());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -199,6 +211,19 @@ export default function RunDetailPage({
         // active polling, so stale cached checks must not persist across refreshes.
         setEmailValChecks({});
       }
+
+      // Phase 6: Load API test suites for all executions
+      const allApiSuites: ApiTestSuiteRecord[] = [];
+      await Promise.all(
+        loadedExecs.map(async exec => {
+          const suiteRes = await listApiTestSuites(exec.id);
+          if (suiteRes.success && suiteRes.suites) {
+            allApiSuites.push(...suiteRes.suites);
+          }
+        }),
+      );
+      setApiTestSuites(allApiSuites);
+      setApiTestAssertions({});
     } catch {
       setError('An error occurred while loading run');
     } finally {
@@ -235,6 +260,25 @@ export default function RunDetailPage({
         }
       } finally {
         fetchingChecks.current.delete(evRunId);
+      }
+    }
+  }
+
+  async function handleExpandApiSuite(suiteId: number) {
+    if (expandedApiSuite === suiteId) {
+      setExpandedApiSuite(null);
+      return;
+    }
+    setExpandedApiSuite(suiteId);
+    if (!apiTestAssertions[suiteId] && !fetchingApiAssertions.current.has(suiteId)) {
+      fetchingApiAssertions.current.add(suiteId);
+      try {
+        const res = await listApiTestAssertions(suiteId);
+        if (res.success && res.assertions) {
+          setApiTestAssertions(prev => ({ ...prev, [suiteId]: res.assertions! }));
+        }
+      } finally {
+        fetchingApiAssertions.current.delete(suiteId);
       }
     }
   }
@@ -510,6 +554,109 @@ export default function RunDetailPage({
                                     >
                                       <Link2 className="w-3 h-3" aria-hidden="true" />
                                     </a>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Phase 6: API Test Results panel */}
+            {apiTestSuites.length > 0 && (
+              <div className="bg-white rounded-lg border border-zinc-200 overflow-hidden">
+                <div className="px-4 py-3 border-b border-zinc-200 bg-zinc-50 flex items-center gap-2">
+                  <Zap className="w-4 h-4 text-zinc-500" />
+                  <h2 className="text-sm font-semibold text-zinc-700">
+                    API Tests ({apiTestSuites.length} suite{apiTestSuites.length !== 1 ? 's' : ''})
+                  </h2>
+                  {/* Summary counters */}
+                  <div className="ml-auto flex items-center gap-3 text-xs">
+                    <span className="text-green-700">
+                      {apiTestSuites.reduce((s, t) => s + t.passed_assertions, 0)} passed
+                    </span>
+                    <span className="text-red-700">
+                      {apiTestSuites.reduce((s, t) => s + t.failed_assertions, 0)} failed
+                    </span>
+                    <span className="text-zinc-400">
+                      {apiTestSuites.reduce((s, t) => s + t.skipped_assertions, 0)} skipped
+                    </span>
+                  </div>
+                </div>
+                <div className="divide-y divide-zinc-100">
+                  {apiTestSuites.map(suite => {
+                    const isExpanded = expandedApiSuite === suite.id;
+                    const assertions = apiTestAssertions[suite.id] ?? [];
+                    const suiteStatusColor =
+                      suite.status === 'passed' ? 'text-green-700 bg-green-50' :
+                      suite.status === 'failed' ? 'text-red-700 bg-red-50' :
+                      suite.status === 'error' ? 'text-red-700 bg-red-50' :
+                      suite.status === 'skipped' ? 'text-zinc-500 bg-zinc-100' :
+                      'text-blue-700 bg-blue-50';
+                    const suiteLabel = suite.suite_type
+                      .replace(/_/g, ' ')
+                      .replace(/\b\w/g, c => c.toUpperCase());
+
+                    return (
+                      <div key={suite.id}>
+                        <button
+                          onClick={() => handleExpandApiSuite(suite.id)}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-zinc-50 transition-colors"
+                        >
+                          {isExpanded ? <ChevronDown className="w-4 h-4 text-zinc-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-zinc-400 shrink-0" />}
+                          <Zap className="w-4 h-4 text-indigo-500 shrink-0" />
+                          <span className="flex-1 text-xs font-medium text-zinc-900">{suiteLabel}</span>
+                          <span className="text-xs text-zinc-500 mr-2">
+                            {suite.passed_assertions}/{suite.total_assertions} passed
+                          </span>
+                          <span className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full ${suiteStatusColor}`}>
+                            {suite.status}
+                          </span>
+                          {suite.duration_ms !== null && (
+                            <span className="text-xs text-zinc-400 shrink-0 ml-2">
+                              {suite.duration_ms < 1000
+                                ? `${suite.duration_ms}ms`
+                                : `${(suite.duration_ms / 1000).toFixed(1)}s`}
+                            </span>
+                          )}
+                        </button>
+                        {isExpanded && (
+                          <div className="px-10 pb-3 space-y-1">
+                            {suite.error_message && (
+                              <p className="text-xs text-red-600 mb-2">{suite.error_message}</p>
+                            )}
+                            {assertions.length === 0 && (
+                              <p className="text-xs text-zinc-400">No assertion results yet.</p>
+                            )}
+                            {assertions.map(a => {
+                              const aColor =
+                                a.status === 'passed' ? 'text-green-700' :
+                                a.status === 'failed' ? 'text-red-700' :
+                                a.status === 'skipped' ? 'text-zinc-400' :
+                                'text-amber-700';
+                              return (
+                                <div key={a.id} className="flex items-start gap-2 text-xs">
+                                  <span className={`font-mono shrink-0 w-3 mt-0.5 ${aColor}`}>
+                                    {a.status === 'passed' ? '✓' : a.status === 'skipped' ? '–' : '✗'}
+                                  </span>
+                                  <span className="text-zinc-500 shrink-0 w-44 truncate" title={a.assertion_name}>
+                                    {a.assertion_name}
+                                  </span>
+                                  <span className="text-zinc-400 shrink-0 w-16 font-mono">
+                                    {a.http_method} {a.response_status ?? ''}
+                                  </span>
+                                  <span className={`${aColor} flex-1 truncate`} title={a.error_message ?? a.actual_value ?? '—'}>
+                                    {a.error_message ?? (a.status === 'passed' ? (a.actual_value ?? 'OK') : a.actual_value) ?? '—'}
+                                  </span>
+                                  {a.response_time_ms !== null && (
+                                    <span className="text-zinc-400 shrink-0 ml-2">
+                                      {a.response_time_ms}ms
+                                    </span>
                                   )}
                                 </div>
                               );

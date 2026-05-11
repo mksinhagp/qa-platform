@@ -5,7 +5,8 @@ import { requireCapability } from '@qa-platform/auth';
 import { getEnv, loadEnv } from '@qa-platform/config';
 import { z } from 'zod';
 import { randomBytes } from 'crypto';
-import { getSite } from './sites';
+import { buildTestEmailAddress, generateCorrelationToken } from '@qa-platform/email';
+import { getSite, getSiteEnvironment } from './sites';
 
 // ─── Validation Schemas ──────────────────────────────────────────────────────
 
@@ -338,8 +339,31 @@ export async function createRun(data: z.infer<typeof createRunSchema>): Promise<
       throw new Error('Failed to get site details');
     }
 
+    const environmentResult = await getSiteEnvironment(d.site_environment_id);
+    if (!environmentResult.success || !environmentResult.environment) {
+      throw new Error('Failed to get site environment details');
+    }
+
+    const emailBindingRows = await invokeProc('sp_site_env_email_bindings_list', {
+      i_site_id: d.site_id,
+      i_site_environment_id: d.site_environment_id,
+    });
+
+    const emailBinding = (emailBindingRows as Array<{
+      o_email_inbox_id: number;
+      o_username: string;
+      o_role_tag: string;
+      o_is_active: boolean;
+    }>).find(row => row.o_is_active && ['registrant', 'default', 'confirmation'].includes(row.o_role_tag))
+      ?? (emailBindingRows as Array<{
+        o_email_inbox_id: number;
+        o_username: string;
+        o_role_tag: string;
+        o_is_active: boolean;
+      }>).find(row => row.o_is_active);
+
     // Materialize executions (cartesian product: personas x browsers x flows x device_profiles x network_profiles)
-    const executions: Array<{ execution_id: number; site_id: string; base_url: string; callback_url: string; callback_token: string; flow_name: string; persona_id: string; browser: string }> = [];
+    const executions: Array<{ execution_id: number; site_id: string; base_url: string; callback_url: string; callback_token: string; flow_name: string; persona_id: string; browser: string; email_validation?: { inbox_id: number; correlation_token: string; test_email: string; expected_subject_pattern?: string; wait_timeout_ms?: number } }> = [];
     
     for (const personaId of d.persona_ids) {
       for (const browser of d.browsers) {
@@ -348,6 +372,18 @@ export async function createRun(data: z.infer<typeof createRunSchema>): Promise<
             for (const networkProfileId of d.network_profile_ids) {
               const callbackToken = randomBytes(32).toString('base64url');
               const callbackUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/runner/callback`;
+              const emailValidation = emailBinding && ['registration', 'checkout'].includes(flowName)
+                ? (() => {
+                    const correlationToken = generateCorrelationToken();
+                    return {
+                      inbox_id: emailBinding.o_email_inbox_id,
+                      correlation_token: correlationToken,
+                      test_email: buildTestEmailAddress(emailBinding.o_username, correlationToken),
+                      expected_subject_pattern: flowName === 'checkout' ? 'confirm' : 'registration',
+                      wait_timeout_ms: 5 * 60 * 1000,
+                    };
+                  })()
+                : undefined;
               
               const execResult = await invokeProcWrite('sp_run_executions_insert', {
                 i_run_id: runId,
@@ -366,12 +402,13 @@ export async function createRun(data: z.infer<typeof createRunSchema>): Promise<
               executions.push({
                 execution_id: executionId,
                 site_id: d.site_id.toString(),
-                base_url: siteResult.site.base_url,
+                base_url: environmentResult.environment.base_url || siteResult.site.base_url,
                 callback_url: callbackUrl,
                 callback_token: callbackToken,
                 flow_name: flowName,
                 persona_id: personaId,
                 browser: browser,
+                ...(emailValidation ? { email_validation: emailValidation } : {}),
               });
             }
           }

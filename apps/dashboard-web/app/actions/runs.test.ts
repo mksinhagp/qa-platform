@@ -34,6 +34,10 @@ vi.mock('./sites', () => ({
     success: true,
     site: { id: 10, name: 'Demo Site', base_url: 'https://demo.example.com', is_active: true },
   }),
+  getSiteEnvironment: vi.fn().mockResolvedValue({
+    success: true,
+    environment: { id: 20, site_id: 10, name: 'staging', base_url: 'https://staging.example.com', is_active: true },
+  }),
   listSites: vi.fn().mockResolvedValue({ success: true, sites: [] }),
   listSiteEnvironments: vi.fn().mockResolvedValue({ success: true, environments: [] }),
 }));
@@ -321,6 +325,7 @@ describe('createRun', () => {
   it('creates run and returns runId', async () => {
     // sp_runs_insert → returns run id=5
     vi.mocked(invokeProcWrite).mockResolvedValueOnce([{ o_id: 5, o_status: 'draft' }]);
+    vi.mocked(invokeProc).mockResolvedValueOnce([]);
     // sp_run_executions_insert calls (one per persona × browser × flow × device × network)
     vi.mocked(invokeProcWrite).mockResolvedValue([{ o_id: 100 }]);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 202 }));
@@ -339,6 +344,7 @@ describe('createRun', () => {
 
   it('stores config as JSON string', async () => {
     vi.mocked(invokeProcWrite).mockResolvedValueOnce([{ o_id: 5, o_status: 'draft' }]);
+    vi.mocked(invokeProc).mockResolvedValueOnce([]);
     vi.mocked(invokeProcWrite).mockResolvedValue([{ o_id: 100 }]);
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 202 }));
 

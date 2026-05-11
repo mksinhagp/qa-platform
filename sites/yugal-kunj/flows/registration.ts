@@ -22,7 +22,7 @@ import type { PersonaRunner, FlowDefinition } from '@qa-platform/playwright-core
 const TEST_REGISTRANT = {
   first_name: 'QA',
   last_name: 'Tester',
-  email: 'qa+yk@example.com',
+  email: 'qa@example.com',
   phone: '555-000-1234',
   dob: '01/01/1990',
 };
@@ -141,7 +141,7 @@ export const registrationFlow: FlowDefinition = {
         if (emailField) {
           await runner.type(
             'input[type="email"], input[name="email"]',
-            TEST_REGISTRANT.email,
+            runner.executionContext.testEmail ?? TEST_REGISTRANT.email,
           );
         }
 

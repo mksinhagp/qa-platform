@@ -8,6 +8,9 @@ export default defineConfig({
       '@qa-platform/db': path.resolve(__dirname, 'packages/db/src/index.ts'),
       '@qa-platform/auth': path.resolve(__dirname, 'packages/auth/src/index.ts'),
       '@qa-platform/vault': path.resolve(__dirname, 'packages/vault/src/index.ts'),
+      '@qa-platform/rules': path.resolve(__dirname, 'packages/rules/src/index.ts'),
+      '@qa-platform/shared-types': path.resolve(__dirname, 'packages/shared-types/src/index.ts'),
+      '@qa-platform/api-testing': path.resolve(__dirname, 'packages/api-testing/src/index.ts'),
     },
   },
   test: {

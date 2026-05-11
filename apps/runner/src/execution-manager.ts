@@ -18,10 +18,13 @@ import {
   type StepResult,
   type FrictionSignal,
   type FlowDefinition,
+  type ExecutionContext,
 } from '@qa-platform/playwright-core';
 import type { Persona } from '@qa-platform/shared-types';
 import { getPersonaById, V1_PERSONAS } from '@qa-platform/personas';
 import { Logger } from '@qa-platform/shared-types';
+import { runApiTests, type ApiTestConfig, type ApiSuiteResult, type ApiEndpointConfig } from '@qa-platform/api-testing';
+import { loadSiteRules } from '@qa-platform/rules';
 
 const logger = new Logger('execution-manager');
 
@@ -54,6 +57,13 @@ export interface ExecutionRequest {
   callback_token: string;
   /** Dashboard internal URL to POST execution results and approval requests */
   callback_url: string;
+  email_validation?: {
+    inbox_id: number;
+    correlation_token: string;
+    test_email: string;
+    expected_subject_pattern?: string;
+    wait_timeout_ms?: number;
+  };
 }
 
 export interface RunRequest {
@@ -134,6 +144,43 @@ async function loadFlows(siteId: string, baseUrl: string): Promise<Record<string
       ],
     };
     return { stub, browse: stub, registration: stub };
+  }
+}
+
+// ─── API endpoint loading ────────────────────────────────────────────────────
+
+const apiEndpointCache = new Map<string, ApiEndpointConfig[]>();
+
+/**
+ * Load API endpoints for a site from sites/<siteId>/api-endpoints.js.
+ * Returns an empty array if no endpoints file is found (graceful degradation).
+ */
+async function loadApiEndpoints(siteId: string): Promise<ApiEndpointConfig[]> {
+  validateSiteId(siteId);
+  const cached = apiEndpointCache.get(siteId);
+  if (cached) return cached;
+
+  try {
+    const sitesRoot = process.env.BUSINESS_RULES_PATH ?? './sites';
+    const resolvedRoot = path.resolve(sitesRoot);
+    const jsPath = path.resolve(sitesRoot, siteId, 'api-endpoints.js');
+    const tsPath = path.resolve(sitesRoot, siteId, 'api-endpoints.ts');
+    const endpointPath = existsSync(jsPath) ? jsPath : tsPath;
+    if (!endpointPath.startsWith(resolvedRoot + path.sep)) {
+      throw new Error(`Path traversal detected for site "${siteId}"`);
+    }
+    const mod = await import(endpointPath) as {
+      apiEndpoints?: ApiEndpointConfig[];
+      default?: ApiEndpointConfig[];
+    };
+    const endpoints = mod.apiEndpoints ?? mod.default ?? [];
+    apiEndpointCache.set(siteId, endpoints);
+    logger.info(`Loaded ${endpoints.length} API endpoints for site "${siteId}"`);
+    return endpoints;
+  } catch {
+    logger.info(`No API endpoints file found for site "${siteId}" — API testing will be skipped`);
+    apiEndpointCache.set(siteId, []);
+    return [];
   }
 }
 
@@ -462,6 +509,184 @@ async function sendCallback(
   );
 }
 
+async function sendEmailValidationRequest(
+  ex: ExecutionRequest,
+  correlationId: string,
+): Promise<void> {
+  if (!ex.email_validation) return;
+
+  const emailValidateUrl = new URL(ex.callback_url);
+  emailValidateUrl.pathname = '/api/runner/email-validate';
+
+  validateCallbackUrl(emailValidateUrl.toString());
+
+  const waitTimeoutMs = ex.email_validation.wait_timeout_ms ?? 5 * 60 * 1000;
+  const body = {
+    execution_id: ex.execution_id,
+    inbox_id: ex.email_validation.inbox_id,
+    correlation_token: ex.email_validation.correlation_token,
+    expected_subject_pattern: ex.email_validation.expected_subject_pattern,
+    wait_until: new Date(Date.now() + waitTimeoutMs).toISOString(),
+  };
+
+  const resp = await fetch(emailValidateUrl.toString(), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Runner-Token': ex.callback_token,
+      'X-Correlation-Id': correlationId,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!resp.ok) {
+    logger.warn(
+      `Email validation request for execution ${ex.execution_id} returned ${resp.status}`,
+      undefined,
+      correlationId,
+    );
+  }
+}
+
+// ─── Phase 6: API test post-step ─────────────────────────────────────────────
+
+/**
+ * Run API tests as a post-step after browser flow completion, then report results
+ * back to the dashboard via the callback endpoint.
+ */
+async function runApiTestPostStep(
+  ex: ExecutionRequest,
+  runner: PersonaRunner,
+  correlationId: string,
+): Promise<void> {
+  const endpoints = await loadApiEndpoints(ex.site_id);
+  if (endpoints.length === 0) {
+    logger.info(
+      `Execution ${ex.execution_id}: no API endpoints configured — skipping API tests`,
+      undefined,
+      correlationId,
+    );
+    return;
+  }
+
+  let rules;
+  try {
+    rules = await loadSiteRules(ex.site_id);
+  } catch (err) {
+    logger.warn(
+      `Execution ${ex.execution_id}: could not load site rules for API tests — ${String(err)}`,
+      undefined,
+      correlationId,
+    );
+    return;
+  }
+
+  const apiConfig: ApiTestConfig = {
+    base_url: ex.base_url,
+    endpoints,
+    rules,
+    browser_state: runner.getCapturedState(),
+    overall_timeout_ms: 60_000,
+  };
+
+  logger.info(
+    `Execution ${ex.execution_id}: running API test post-step (${endpoints.length} endpoints)`,
+    undefined,
+    correlationId,
+  );
+
+  let suiteResults: ApiSuiteResult[];
+  try {
+    suiteResults = await runApiTests(apiConfig);
+  } catch (err) {
+    logger.error(
+      `Execution ${ex.execution_id}: API test suite failed`,
+      err instanceof Error ? err : new Error(String(err)),
+      undefined,
+      correlationId,
+    );
+    return;
+  }
+
+  // Report API test results to dashboard
+  await sendApiTestCallback(ex, suiteResults, correlationId);
+
+  const totalPassed = suiteResults.reduce((sum, s) => sum + s.passed_assertions, 0);
+  const totalFailed = suiteResults.reduce((sum, s) => sum + s.failed_assertions, 0);
+  logger.info(
+    `Execution ${ex.execution_id}: API tests complete — ${totalPassed} passed, ${totalFailed} failed across ${suiteResults.length} suite(s)`,
+    undefined,
+    correlationId,
+  );
+}
+
+/**
+ * Send API test results to the dashboard callback endpoint.
+ */
+async function sendApiTestCallback(
+  ex: ExecutionRequest,
+  suiteResults: ApiSuiteResult[],
+  correlationId: string,
+): Promise<void> {
+  validateCallbackUrl(ex.callback_url);
+
+  const body = {
+    type: 'api_test_result',
+    execution_id: ex.execution_id,
+    suites: suiteResults.map(s => ({
+      suite_type: s.suite_type,
+      status: s.status,
+      total_assertions: s.total_assertions,
+      passed_assertions: s.passed_assertions,
+      failed_assertions: s.failed_assertions,
+      skipped_assertions: s.skipped_assertions,
+      started_at: s.started_at.toISOString(),
+      completed_at: s.completed_at.toISOString(),
+      duration_ms: s.duration_ms,
+      error_message: s.error_message,
+      metadata: s.metadata,
+      assertions: s.assertions.map(a => ({
+        endpoint_url: a.endpoint_url,
+        http_method: a.http_method,
+        assertion_name: a.assertion_name,
+        status: a.status,
+        expected_value: a.expected_value,
+        actual_value: a.actual_value,
+        response_status: a.response_status,
+        response_time_ms: a.response_time_ms,
+        error_message: a.error_message,
+        detail: a.detail,
+      })),
+    })),
+  };
+
+  try {
+    const resp = await fetch(ex.callback_url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Runner-Token': ex.callback_token,
+        'X-Correlation-Id': correlationId,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) {
+      logger.warn(
+        `API test callback for execution ${ex.execution_id} returned ${resp.status}`,
+        undefined,
+        correlationId,
+      );
+    }
+  } catch (err) {
+    logger.warn(
+      `API test callback for execution ${ex.execution_id} failed: ${String(err)}`,
+      undefined,
+      correlationId,
+    );
+  }
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -546,7 +771,12 @@ export class ExecutionManager {
     try {
       const persona = lookupPersona(ex.persona_id);
       browser = await getBrowser(ex.browser);
-      runner = new PersonaRunner(browser, persona);
+      const executionContext: ExecutionContext = {
+        baseUrl: ex.base_url,
+        testEmail: ex.email_validation?.test_email,
+        correlationToken: ex.email_validation?.correlation_token,
+      };
+      runner = new PersonaRunner(browser, persona, executionContext);
       await runner.setup();
 
       // Load real site flows; falls back to stub if site directory not found
@@ -567,6 +797,26 @@ export class ExecutionManager {
         undefined,
         this._correlationId,
       );
+
+      if (result.passed) {
+        await sendEmailValidationRequest(ex, this._correlationId);
+      }
+
+      // Phase 6: Run API tests as a post-step after browser flow completes.
+      // API tests run regardless of browser flow outcome (passed, failed, or friction_flagged)
+      // so we can still validate reachability and schema even if the browser flow had issues.
+      // Only skip for aborted/skipped_by_approval where the flow didn't really execute.
+      if (result.status !== 'aborted' && result.status !== 'skipped_by_approval' && runner) {
+        try {
+          await runApiTestPostStep(ex, runner, this._correlationId);
+        } catch (apiErr) {
+          logger.warn(
+            `Execution ${ex.execution_id}: API test post-step error (non-fatal): ${String(apiErr)}`,
+            undefined,
+            this._correlationId,
+          );
+        }
+      }
 
       await sendCallback(ex.callback_url, ex.callback_token, ex.execution_id, result, this._correlationId);
     } catch (err) {

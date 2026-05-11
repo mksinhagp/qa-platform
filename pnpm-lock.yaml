@@ -114,6 +114,9 @@ importers:
       '@playwright/test':
         specifier: ^1.48.0
         version: 1.59.1
+      '@qa-platform/api-testing':
+        specifier: workspace:*
+        version: link:../../packages/api-testing
       '@qa-platform/approvals':
         specifier: workspace:*
         version: link:../../packages/approvals
@@ -144,6 +147,25 @@ importers:
         version: 4.21.0
       typescript:
         specifier: ^5
+        version: 5.9.3
+
+  packages/api-testing:
+    dependencies:
+      '@qa-platform/rules':
+        specifier: workspace:*
+        version: link:../rules
+      '@qa-platform/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
+      zod:
+        specifier: ^3.22.4
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^20.10.0
+        version: 20.19.40
+      typescript:
+        specifier: ^5.3.3
         version: 5.9.3
 
   packages/approvals:

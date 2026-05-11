@@ -1,7 +1,7 @@
 /**
  * POST /api/runner/callback
  *
- * Two payload types (differentiated by `type` field):
+ * Three payload types (differentiated by `type` field):
  *
  *  1. "execution_result" — the runner finished an execution and is reporting results.
  *     Writes step results, friction signals, and final status back to the DB.
@@ -9,6 +9,9 @@
  *  2. "approval_request" — the runner hit an approval-gated step and needs an operator
  *     decision before it can proceed.
  *     Creates an approvals row and returns { approval_id } to the runner.
+ *
+ *  3. "api_test_result" — the runner completed API validation post-step and is
+ *     reporting suite/assertion results for storage in the DB (Phase 6).
  *
  * Authentication: one-time callback token validated against the stored token
  *   in the run_executions table (i_callback_token param).
@@ -156,6 +159,80 @@ export async function POST(request: NextRequest) {
     } catch (err) {
       console.error('Approval request callback error:', err);
       return NextResponse.json({ error: 'Failed to create approval request' }, { status: 500 });
+    }
+  }
+
+  // ─── Handle API test results (Phase 6) ────────────────────────────────────
+  if (type === 'api_test_result') {
+    const executionId = body.execution_id as number | undefined;
+    const suites = body.suites as Array<Record<string, unknown>> | undefined;
+
+    if (!executionId || !Array.isArray(suites)) {
+      return NextResponse.json(
+        { error: 'execution_id and suites[] are required for api_test_result' },
+        { status: 400 },
+      );
+    }
+
+    // Validate callback token
+    try {
+      const tokenRows = await invokeProc('sp_run_executions_validate_token', {
+        i_id: executionId,
+        i_callback_token: token,
+      });
+      type TokenRow = { o_valid: boolean };
+      const valid = (tokenRows as TokenRow[])[0]?.o_valid;
+      if (!valid) {
+        return NextResponse.json({ error: 'Invalid callback token' }, { status: 401 });
+      }
+    } catch {
+      return NextResponse.json({ error: 'Token validation failed' }, { status: 401 });
+    }
+
+    try {
+      for (const suite of suites) {
+        const suiteType = suite.suite_type as string;
+        const suiteStatus = suite.status as string;
+        const assertions = suite.assertions as Array<Record<string, unknown>> | undefined;
+
+        // Insert suite record
+        const suiteResult = await invokeProcWrite('sp_api_test_suites_insert', {
+          i_run_execution_id: executionId,
+          i_suite_type: suiteType,
+          i_metadata: suite.metadata ? JSON.stringify(suite.metadata) : null,
+          i_created_by: 'runner',
+        });
+
+        const suiteId = suiteResult[0]?.o_id as number | undefined;
+        if (!suiteId) continue;
+
+        // Batch insert assertions if present
+        if (assertions && assertions.length > 0) {
+          await invokeProcWrite('sp_api_test_assertions_insert_batch', {
+            i_api_test_suite_id: suiteId,
+            i_assertions: JSON.stringify(assertions),
+            i_created_by: 'runner',
+          });
+        }
+
+        // Update suite with final status and counters
+        await invokeProcWrite('sp_api_test_suites_update', {
+          i_id: suiteId,
+          i_status: suiteStatus,
+          i_total_assertions: (suite.total_assertions as number) ?? 0,
+          i_passed_assertions: (suite.passed_assertions as number) ?? 0,
+          i_failed_assertions: (suite.failed_assertions as number) ?? 0,
+          i_skipped_assertions: (suite.skipped_assertions as number) ?? 0,
+          i_duration_ms: (suite.duration_ms as number) ?? null,
+          i_error_message: (suite.error_message as string) ?? null,
+          i_updated_by: 'runner',
+        });
+      }
+
+      return NextResponse.json({ success: true, suites_processed: suites.length });
+    } catch (err) {
+      console.error('API test result callback error:', err);
+      return NextResponse.json({ error: 'Failed to record API test results' }, { status: 500 });
     }
   }
 

@@ -43,9 +43,7 @@ export const checkoutFlow: FlowDefinition = {
       fn: async (runner: PersonaRunner) => {
         runner.collector.setStep('navigate_to_cart');
 
-        // The cart/checkout is typically reached after registration selection.
-        // Navigate to the portal root; the cart icon or checkout link should be visible.
-        await runner.goto('https://ykportalnextgenqa.yugalkunj.org');
+        await runner.goto(runner.executionContext.baseUrl);
         await runner.page.waitForFunction(
           '() => document.querySelector("#root")?.children.length > 0',
           { timeout: 15000 },
@@ -112,9 +110,7 @@ export const checkoutFlow: FlowDefinition = {
 
         // Use card details from the execution context (injected by runner from vault)
         // Fall back to the static sandbox card if no profile was provided.
-        const card =
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          (runner as any).executionContext?.paymentProfile ?? FALLBACK_SANDBOX_CARD;
+        const card = runner.executionContext.paymentProfile ?? FALLBACK_SANDBOX_CARD;
 
         await runner.page.waitForSelector(
           'input[name="cardNumber"], input[placeholder*="card"], ' +

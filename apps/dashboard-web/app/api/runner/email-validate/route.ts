@@ -18,7 +18,9 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import { invokeProc } from '@qa-platform/db';
+import { decryptSecret } from '@qa-platform/vault';
 import { startEmailValidation } from '../../../actions/emailValidation.js';
 import type { ImapConfig } from '@qa-platform/email';
 
@@ -50,11 +52,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // TODO Phase 9: add sp_run_executions_validate_token proc and validate `token`
-  // against run_executions.callback_token for the given executionId.
-  // Until then, security relies on the internal Docker network boundary.
-  // Log correlationId for audit trail — do not remove.
-  void correlationId;
+  const tokenRows = await invokeProc('sp_run_executions_validate_token', {
+    i_id: executionId,
+    i_callback_token: token,
+  }).catch(err => {
+    console.error('[EmailValidation] Token validation error:', err);
+    return [];
+  });
+
+  if (tokenRows[0]?.o_is_valid !== true) {
+    return NextResponse.json({ error: 'Invalid runner token' }, { status: 401 });
+  }
 
   // Fetch the inbox IMAP credentials
   // In production: decrypt via vault. For now, fetch the inbox metadata and
@@ -76,13 +84,40 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: `Email inbox ${inboxId} not found or inactive` }, { status: 404 });
   }
 
-  // Decrypt the IMAP password from the vault
-  // The vault must be unlocked for this to work (it's a server-side operation,
-  // so we use a service-level vault context — the dashboard process holds the RVK).
-  // For now we use a placeholder; the vault decrypt call is wired in Phase 9 hardening.
-  // The email validation pipeline will gracefully fail with an IMAP auth error
-  // and record it in email_validation_checks.
-  const imapPassword = process.env.EMAIL_INBOX_TEST_PASSWORD ?? '';
+  const cookieStore = await cookies();
+  const unlockToken = cookieStore.get('unlock_token')?.value ?? null;
+
+  if (!unlockToken) {
+    return NextResponse.json({ error: 'Vault is locked. Please unlock before email validation.' }, { status: 503 });
+  }
+
+  const secretRows = await invokeProc('sp_secret_records_get_by_id', {
+    i_id: inbox.o_secret_id,
+  });
+
+  const secret = secretRows[0] as {
+    o_encrypted_payload: Buffer;
+    o_nonce: Buffer;
+    o_wrapped_dek: Buffer;
+    o_wrap_nonce: Buffer | null;
+  } | undefined;
+
+  if (!secret) {
+    return NextResponse.json({ error: `Secret ${inbox.o_secret_id} not found` }, { status: 404 });
+  }
+
+  if (!secret.o_wrap_nonce) {
+    return NextResponse.json({ error: 'Secret record is missing wrap_nonce' }, { status: 500 });
+  }
+
+  const plaintext = await decryptSecret(
+    unlockToken,
+    secret.o_encrypted_payload,
+    secret.o_nonce,
+    secret.o_wrapped_dek,
+    secret.o_wrap_nonce,
+  );
+  const imapPassword = plaintext.toString('utf8');
 
   const imapConfig: ImapConfig = {
     host: inbox.o_host,
@@ -117,7 +152,7 @@ export async function POST(request: NextRequest) {
     waitUntil,
     'runner',
   ).catch(err => {
-    console.error('[EmailValidation] Route startEmailValidation error:', err);
+    console.error(`[EmailValidation] Route startEmailValidation error (${correlationId}):`, err);
   });
 
   return NextResponse.json(
