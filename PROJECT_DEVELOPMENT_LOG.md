@@ -3451,3 +3451,74 @@ Modified `apps/runner/src/execution-manager.ts`:
 
 ---
 
+## May 11, 2026
+
+### Phase 9 Code Review — Bugs Found and Fixed
+
+**Task Reference**: Phase 9 Reporting & Narrative Layer — post-implementation code review
+
+#### Overview
+
+After implementing all Phase 9 files (6 stored procedures, shared types, server actions, report UI page, and unit tests), a systematic code review was performed. Six bugs were identified and resolved. The full test suite remained at 272/272 passing throughout.
+
+#### Bugs Found and Fixed
+
+**BUG-1 (Critical / SQL) — Invalid JSONB cast in accessibility summary proc**
+- File: `db/procs/0118_sp_report_accessibility_summary.sql`, lines 69, 76, 83, 90
+- Problem: `COALESCE(SUM((rs.details->'accessibility'->'axe_core'->'violations')::jsonb->>'critical')::INTEGER, 0)` — the outer cast `::INTEGER` was applied to the result of `SUM(text)`. PostgreSQL cannot aggregate text then cast; it errors at runtime.
+- Fix: Cast each row's extracted value to INTEGER before aggregating: `COALESCE(SUM((rs.details->'accessibility'->'axe_core'->'violations'->>'critical')::INTEGER), 0)`. Applied via `CREATE OR REPLACE FUNCTION` on the running Docker container.
+- Impact: Without this fix, every accessibility report query would have thrown a PostgreSQL runtime error.
+
+**BUG-2 (Critical / Security) — Missing auth guard on all report action functions**
+- File: `apps/dashboard-web/app/actions/reports.ts`
+- Problem: `requireCapability` was imported but never called. All 8 exported functions (`getRunSummary`, `getPersonaSummaries`, `getAccessibilitySummary`, `getDeduplicatedIssues`, `getFrictionSignals`, `getExecutionDetail`, `getNarrativeReport`, `getLlmAnalysisForRun`) would respond to unauthenticated requests.
+- Fix: Added `await requireCapability('run.read')` as the first statement inside the `try` block of every function, matching the established pattern in `emailValidation.ts`, `runs.ts`, etc.
+- Impact: Without this fix, any caller (including unauthenticated users) could read full run reports.
+
+**BUG-3 (High / Testing) — `getExecutionDetail` returned success for missing execution**
+- File: `apps/dashboard-web/app/actions/reports.ts` — `getExecutionDetail` function
+- Problem: When the stored procedure returned zero rows, the function returned `{ success: true, data: [] }` instead of `{ success: false, error: '...' }`. The unit test expected `success: false`.
+- Fix: Added an early-return guard (`if (!result || result.length === 0) return { success: false, error: 'Execution not found' }`), matching the pattern used by `getRunSummary`.
+- Impact: UI consumers would silently receive an empty dataset rather than an error state; error-path unit test was failing.
+
+**BUG-4 (High / Performance) — N+1 correlated subqueries in persona summary proc**
+- File: `db/procs/0117_sp_report_persona_summary.sql`
+- Problem: The original implementation used three correlated subqueries (one per metric: total steps, passed steps, duration) evaluated once per persona row, producing an N+1 query pattern that scales poorly with persona count.
+- Fix: Rewrote to a single CTE using `jsonb_array_elements` to unnest step arrays once, then aggregated all metrics in a single pass using `ROW_NUMBER()` window function. The rewritten query touches the step data exactly once regardless of persona count.
+- Applied via `CREATE OR REPLACE FUNCTION` on the running Docker container.
+
+**BUG-5 (Medium / TypeScript) — `icon: any` in `SummaryCard` component**
+- File: `apps/dashboard-web/app/dashboard/runs/[runId]/report/page.tsx`, `SummaryCard` props interface
+- Problem: The `icon` prop was typed as `any`, bypassing TypeScript strict-mode checks.
+- Fix: Imported `LucideIcon` from `lucide-react` (as a type-only import) and replaced `icon: any` with `icon: LucideIcon`.
+
+**BUG-6 (Medium / TypeScript) — `(e: any)` in `getLlmAnalysisForRun`**
+- File: `apps/dashboard-web/app/actions/reports.ts`
+- Problem: The `.map((e: any) => e.id)` call in `getLlmAnalysisForRun` used an untyped lambda parameter.
+- Fix: Introduced an `ExecutionRow` interface `{ id: string }` and replaced `any` with the typed interface. Resolved during the full file rewrite for BUG-2.
+
+#### Files Modified
+
+| File | Change |
+|------|--------|
+| `db/procs/0117_sp_report_persona_summary.sql` | Rewrote to CTE + window function (BUG-4) |
+| `db/procs/0118_sp_report_accessibility_summary.sql` | Fixed JSONB cast before SUM (BUG-1) |
+| `apps/dashboard-web/app/actions/reports.ts` | Added auth guards to all 8 functions; fixed empty-result check; typed `ExecutionRow` (BUG-2, BUG-3, BUG-6) |
+| `apps/dashboard-web/app/dashboard/runs/[runId]/report/page.tsx` | Replaced `icon: any` with `LucideIcon`; added type-only import (BUG-5) |
+
+#### Test Results
+
+- Before review: 272/272 tests passing (17 test files)
+- After all fixes: 272/272 tests passing (17 test files)
+- No regressions introduced.
+
+#### Lessons Learned
+
+- **SQL aggregation type safety**: PostgreSQL's `SUM()` operates on the declared column type. When extracting JSONB values with `->>` (which returns `text`), cast to the target numeric type *before* passing to `SUM`, not after — `SUM(value::INTEGER)` not `SUM(value)::INTEGER`.
+- **Auth guards must be verified by code review, not inferred from imports**: An imported auth function that is never called provides zero protection. Review checklists should explicitly verify that every server action calls its guard as the first statement.
+- **N+1 in SQL is as harmful as in ORM**: Correlated subqueries that reference the outer query once per row are the SQL equivalent of N+1 ORM queries. Prefer a single CTE or derived table that unnests/joins once.
+- **`type LucideIcon` for icon props**: When a React component accepts a Lucide icon as a prop, type it as `LucideIcon` (imported from `lucide-react`) rather than `any` or `React.FC<...>`. This preserves strict type checking and matches the library's own public API.
+- **Empty-result vs. not-found semantics**: A stored procedure returning zero rows is not the same as "success with an empty list." Functions that look up a single entity (run, execution) should treat zero rows as a not-found error, not a success.
+
+---
+

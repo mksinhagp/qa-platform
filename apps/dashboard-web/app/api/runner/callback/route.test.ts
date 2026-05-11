@@ -622,3 +622,93 @@ describe('POST /api/runner/callback — admin_test_result (Phase 7)', () => {
     expect(suitesJson[0].assertions[0].expected_value).toBe('admin dashboard');
   });
 });
+
+// ─── llm_analysis_result branch (Phase 8) ────────────────────────────────────
+
+describe('POST /api/runner/callback — llm_analysis_result', () => {
+  const validPayload = {
+    type: 'llm_analysis_result',
+    execution_id: 99,
+    task_type: 'failure_summarization',
+    model_used: 'qwen2.5:7b',
+    status: 'completed',
+    result_json: {
+      executive_summary: 'The registration flow failed.',
+      issues: ['Submit button not found'],
+      recommendations: ['Add data-testid to button'],
+      persona_notes: 'Alex was blocked.',
+      severity: 'high',
+    },
+    error_message: null,
+    prompt_tokens: 300,
+    completion_tokens: 150,
+    duration_ms: 4200,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns 400 for missing required fields', async () => {
+    const { status, body } = await responseJson(
+      makeRequest({ type: 'llm_analysis_result', execution_id: 1 }),
+    );
+    expect(status).toBe(400);
+    expect(body.error).toMatch(/Invalid llm_analysis_result payload/i);
+  });
+
+  it('returns 401 when token is invalid (o_is_valid = false)', async () => {
+    // sp_run_executions_validate_token returns o_is_valid field
+    vi.mocked(invokeProc).mockResolvedValueOnce([{ o_is_valid: false }]);
+
+    const { status, body } = await responseJson(makeRequest(validPayload));
+    expect(status).toBe(401);
+    expect(body.error).toMatch(/Invalid callback token/i);
+  });
+
+  it('returns 200 and stores analysis when token is valid', async () => {
+    // Validate token call returns o_is_valid: true
+    vi.mocked(invokeProc).mockResolvedValueOnce([{ o_is_valid: true }]);
+    vi.mocked(invokeProcWrite).mockResolvedValueOnce([{ o_id: 42 }]);
+
+    const { status, body } = await responseJson(makeRequest(validPayload));
+    expect(status).toBe(200);
+    expect(body.success).toBe(true);
+
+    // Verify sp_llm_analysis_upsert was called with correct parameters
+    const procArgs = vi.mocked(invokeProcWrite).mock.calls[0][1] as Record<string, unknown>;
+    expect(procArgs.i_run_execution_id).toBe(99);
+    expect(procArgs.i_task_type).toBe('failure_summarization');
+    expect(procArgs.i_model_used).toBe('qwen2.5:7b');
+    expect(procArgs.i_status).toBe('completed');
+    expect(procArgs.i_prompt_tokens).toBe(300);
+    expect(procArgs.i_completion_tokens).toBe(150);
+    expect(procArgs.i_duration_ms).toBe(4200);
+  });
+
+  it('stores null result_json when LLM call failed (status=error)', async () => {
+    vi.mocked(invokeProc).mockResolvedValueOnce([{ o_is_valid: true }]);
+    vi.mocked(invokeProcWrite).mockResolvedValueOnce([{ o_id: 43 }]);
+
+    const errorPayload = {
+      ...validPayload,
+      status: 'error',
+      result_json: null,
+      error_message: 'Timed out after 90000ms',
+    };
+    const { status } = await responseJson(makeRequest(errorPayload));
+    expect(status).toBe(200);
+
+    const procArgs = vi.mocked(invokeProcWrite).mock.calls[0][1] as Record<string, unknown>;
+    expect(procArgs.i_result_json).toBeNull();
+    expect(procArgs.i_error_message).toBe('Timed out after 90000ms');
+  });
+
+  it('returns 500 when DB write fails', async () => {
+    vi.mocked(invokeProc).mockResolvedValueOnce([{ o_is_valid: true }]);
+    vi.mocked(invokeProcWrite).mockRejectedValueOnce(new Error('DB connection lost'));
+
+    const { status } = await responseJson(makeRequest(validPayload));
+    expect(status).toBe(500);
+  });
+});

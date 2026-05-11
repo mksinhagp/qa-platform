@@ -26,6 +26,7 @@ import {
   Activity,
   FileText,
   Download,
+  type LucideIcon,
 } from 'lucide-react';
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
@@ -107,7 +108,7 @@ function SummaryCard({
 }: {
   label: string;
   value: number | string;
-  icon: any;
+  icon: LucideIcon;
   colorClass: string;
 }) {
   return (

@@ -788,11 +788,11 @@ function getOllamaClient(): OllamaClient | null {
  *
  * Fires only when:
  *  - OLLAMA_BASE_URL is configured.
- *  - The execution has at least one failed/error step OR friction_score > 0.
+ *  - The execution has at least one failed/error step OR friction_score > 0.1.
  *  - The execution status is not aborted/skipped_by_approval.
  *
  * Non-blocking: errors are logged at warn level and never surface to the caller.
- * Results are sent back to the dashboard via the lllm_analysis callback type.
+ * Results are sent back to the dashboard via the llm_analysis callback type.
  */
 async function runLlmPostStep(
   ex: ExecutionRequest,

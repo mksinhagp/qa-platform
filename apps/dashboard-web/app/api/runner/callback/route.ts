@@ -345,12 +345,13 @@ export async function POST(request: NextRequest) {
 
     try {
       // Validate token first via a read-only proc call
+      // sp_run_executions_validate_token returns o_is_valid (not o_valid)
       const tokenRows = await invokeProc('sp_run_executions_validate_token', {
         i_id: executionId,
         i_callback_token: token,
       });
-      type TokenRow = { o_valid: boolean };
-      const valid = (tokenRows as TokenRow[])[0]?.o_valid === true;
+      type TokenRow = { o_is_valid: boolean };
+      const valid = (tokenRows as TokenRow[])[0]?.o_is_valid === true;
       if (!valid) {
         return NextResponse.json({ error: 'Invalid callback token' }, { status: 401 });
       }

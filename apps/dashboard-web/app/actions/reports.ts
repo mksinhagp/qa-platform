@@ -32,14 +32,21 @@ export interface ReportActionResult<T> {
   error?: string;
 }
 
+// Minimal type for raw execution rows returned by sp_run_executions_list
+interface ExecutionRow {
+  id: number;
+  [key: string]: unknown;
+}
+
 // ─── Run Summary ─────────────────────────────────────────────────────────────
 
 export async function getRunSummary(
   runId: number
 ): Promise<ReportActionResult<RunSummary>> {
   try {
+    await requireCapability('run.read');
     const result = await invokeProc('sp_report_run_summary', { i_run_id: runId });
-    
+
     if (!result || result.length === 0) {
       return { success: false, error: 'Run not found' };
     }
@@ -48,9 +55,9 @@ export async function getRunSummary(
     return { success: true, data: summary };
   } catch (error) {
     console.error('Error fetching run summary:', error);
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Failed to fetch run summary' 
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to fetch run summary',
     };
   }
 }
@@ -61,8 +68,9 @@ export async function getPersonaSummaries(
   runId: number
 ): Promise<ReportActionResult<PersonaSummary[]>> {
   try {
+    await requireCapability('run.read');
     const result = await invokeProc('sp_report_persona_summary', { i_run_id: runId });
-    
+
     if (!result) {
       return { success: false, error: 'Failed to fetch persona summaries' };
     }
@@ -70,9 +78,9 @@ export async function getPersonaSummaries(
     return { success: true, data: result as PersonaSummary[] };
   } catch (error) {
     console.error('Error fetching persona summaries:', error);
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Failed to fetch persona summaries' 
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to fetch persona summaries',
     };
   }
 }
@@ -83,8 +91,9 @@ export async function getAccessibilitySummary(
   runId: number
 ): Promise<ReportActionResult<AccessibilitySummary>> {
   try {
+    await requireCapability('run.read');
     const result = await invokeProc('sp_report_accessibility_summary', { i_run_id: runId });
-    
+
     if (!result || result.length === 0) {
       return { success: false, error: 'Failed to fetch accessibility summary' };
     }
@@ -93,9 +102,9 @@ export async function getAccessibilitySummary(
     return { success: true, data: summary };
   } catch (error) {
     console.error('Error fetching accessibility summary:', error);
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Failed to fetch accessibility summary' 
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to fetch accessibility summary',
     };
   }
 }
@@ -106,8 +115,9 @@ export async function getDeduplicatedIssues(
   runId: number
 ): Promise<ReportActionResult<DeduplicatedIssue[]>> {
   try {
+    await requireCapability('run.read');
     const result = await invokeProc('sp_report_issues_deduplicated', { i_run_id: runId });
-    
+
     if (!result) {
       return { success: false, error: 'Failed to fetch issues' };
     }
@@ -115,9 +125,9 @@ export async function getDeduplicatedIssues(
     return { success: true, data: result as DeduplicatedIssue[] };
   } catch (error) {
     console.error('Error fetching deduplicated issues:', error);
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Failed to fetch issues' 
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to fetch issues',
     };
   }
 }
@@ -128,8 +138,9 @@ export async function getFrictionSignals(
   runId: number
 ): Promise<ReportActionResult<FrictionSignalAggregate[]>> {
   try {
+    await requireCapability('run.read');
     const result = await invokeProc('sp_report_friction_signals', { i_run_id: runId });
-    
+
     if (!result) {
       return { success: false, error: 'Failed to fetch friction signals' };
     }
@@ -137,9 +148,9 @@ export async function getFrictionSignals(
     return { success: true, data: result as FrictionSignalAggregate[] };
   } catch (error) {
     console.error('Error fetching friction signals:', error);
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Failed to fetch friction signals' 
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to fetch friction signals',
     };
   }
 }
@@ -150,18 +161,20 @@ export async function getExecutionDetail(
   executionId: number
 ): Promise<ReportActionResult<ExecutionDetail[]>> {
   try {
+    await requireCapability('run.read');
     const result = await invokeProc('sp_report_execution_detail', { i_execution_id: executionId });
-    
-    if (!result) {
-      return { success: false, error: 'Failed to fetch execution detail' };
+
+    // An empty array means the execution ID does not exist — treat as not found.
+    if (!result || result.length === 0) {
+      return { success: false, error: 'Execution not found' };
     }
 
     return { success: true, data: result as ExecutionDetail[] };
   } catch (error) {
     console.error('Error fetching execution detail:', error);
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Failed to fetch execution detail' 
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to fetch execution detail',
     };
   }
 }
@@ -172,7 +185,10 @@ export async function getNarrativeReport(
   runId: number
 ): Promise<ReportActionResult<NarrativeReport>> {
   try {
-    const [summaryRes, personasRes, accessibilityRes, issuesRes, frictionRes] = 
+    // Auth check at the top of the orchestrating function; individual helpers also check.
+    await requireCapability('run.read');
+
+    const [summaryRes, personasRes, accessibilityRes, issuesRes, frictionRes] =
       await Promise.all([
         getRunSummary(runId),
         getPersonaSummaries(runId),
@@ -212,9 +228,9 @@ export async function getNarrativeReport(
     return { success: true, data: report };
   } catch (error) {
     console.error('Error fetching narrative report:', error);
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Failed to fetch narrative report' 
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to fetch narrative report',
     };
   }
 }
@@ -225,31 +241,32 @@ export async function getLlmAnalysisForRun(
   runId: number
 ): Promise<ReportActionResult<LlmAnalysisRecord[]>> {
   try {
-    // First get all executions for the run
-    // We'll need to query run_executions to get execution IDs
+    await requireCapability('run.read');
+
+    // Fetch all executions for the run to get execution IDs.
     const executions = await invokeProc('sp_run_executions_list', { i_run_id: runId });
-    
+
     if (!executions || executions.length === 0) {
       return { success: true, data: [] };
     }
 
-    const executionIds = executions.map((e: any) => e.id);
-    
-    // Fetch LLM analysis for each execution
-    const analysisPromises = executionIds.map(async (execId: number) => {
-      const result = await listLlmAnalysisByExecution(execId);
-      return result.success ? result.records || [] : [];
-    });
+    const executionIds = (executions as ExecutionRow[]).map((e) => e.id);
 
-    const allAnalysis = await Promise.all(analysisPromises);
-    const flattenedAnalysis = allAnalysis.flat();
+    // Fetch LLM analysis for each execution in parallel.
+    const analysisResults = await Promise.all(
+      executionIds.map(async (execId) => {
+        const result = await listLlmAnalysisByExecution(execId);
+        return result.success ? (result.records ?? []) : [];
+      }),
+    );
 
+    const flattenedAnalysis = analysisResults.flat();
     return { success: true, data: flattenedAnalysis as LlmAnalysisRecord[] };
   } catch (error) {
     console.error('Error fetching LLM analysis:', error);
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Failed to fetch LLM analysis' 
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Failed to fetch LLM analysis',
     };
   }
 }

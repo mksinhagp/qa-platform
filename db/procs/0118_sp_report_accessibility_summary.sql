@@ -64,30 +64,33 @@ BEGIN
   WHERE re.run_id = i_run_id
     AND rs.details->'accessibility'->>'status' = 'failed';
   
-  -- Count axe-core severity issues
+  -- Count axe-core severity issues.
+  -- The ::INTEGER cast must be INSIDE SUM() so each row value is cast before aggregation.
+  -- (rs.details->'accessibility'->'axe_core'->'violations'->>'critical') returns text per row;
+  -- SUM(text) is invalid — casting after SUM operates on the text result, not numeric values.
   SELECT
-    COALESCE(SUM((rs.details->'accessibility'->'axe_core'->'violations')::jsonb->>'critical')::INTEGER, 0) INTO v_critical_issues
+    COALESCE(SUM((rs.details->'accessibility'->'axe_core'->'violations'->>'critical')::INTEGER), 0) INTO v_critical_issues
   FROM run_steps rs
   JOIN run_executions re ON rs.run_execution_id = re.id
   WHERE re.run_id = i_run_id
     AND rs.details->'accessibility'->'axe_core' IS NOT NULL;
   
   SELECT
-    COALESCE(SUM((rs.details->'accessibility'->'axe_core'->'violations')::jsonb->>'serious')::INTEGER, 0) INTO v_serious_issues
+    COALESCE(SUM((rs.details->'accessibility'->'axe_core'->'violations'->>'serious')::INTEGER), 0) INTO v_serious_issues
   FROM run_steps rs
   JOIN run_executions re ON rs.run_execution_id = re.id
   WHERE re.run_id = i_run_id
     AND rs.details->'accessibility'->'axe_core' IS NOT NULL;
   
   SELECT
-    COALESCE(SUM((rs.details->'accessibility'->'axe_core'->'violations')::jsonb->>'moderate')::INTEGER, 0) INTO v_moderate_issues
+    COALESCE(SUM((rs.details->'accessibility'->'axe_core'->'violations'->>'moderate')::INTEGER), 0) INTO v_moderate_issues
   FROM run_steps rs
   JOIN run_executions re ON rs.run_execution_id = re.id
   WHERE re.run_id = i_run_id
     AND rs.details->'accessibility'->'axe_core' IS NOT NULL;
   
   SELECT
-    COALESCE(SUM((rs.details->'accessibility'->'axe_core'->'violations')::jsonb->>'minor')::INTEGER, 0) INTO v_minor_issues
+    COALESCE(SUM((rs.details->'accessibility'->'axe_core'->'violations'->>'minor')::INTEGER), 0) INTO v_minor_issues
   FROM run_steps rs
   JOIN run_executions re ON rs.run_execution_id = re.id
   WHERE re.run_id = i_run_id
