@@ -3453,6 +3453,76 @@ Modified `apps/runner/src/execution-manager.ts`:
 
 ## May 11, 2026
 
+### Phase 8 Code Review — Bugs Found and Fixed
+
+**Task Reference**: Phase 8 Ollama Integration — post-implementation comprehensive code review  
+**Commit**: `1f9bd9a` (included within Phase 9 code review commit)  
+**Test count before fixes**: 272/272 passing  
+**Test count after fixes**: 277/277 passing (5 new regression tests added)  
+**Typecheck**: 15/15 tasks green throughout
+
+#### Overview
+
+After completing all Phase 8 implementation (packages/llm, DB migration 0018, stored procs 0110–0116, runner integration, and dashboard additions), a systematic code review was conducted covering all 41 changed files. Three bugs were found and fixed; five regression tests were written to prevent recurrence.
+
+#### Bugs Found and Fixed
+
+**BUG-1 (Critical / Auth) — LLM analysis callbacks always returned 401**
+- File: `apps/dashboard-web/app/api/runner/callback/route.ts`, line 352
+- Problem: The `llm_analysis_result` handler called `sp_run_executions_validate_token` to validate the runner token, then read `o_valid` from the returned row. The actual stored procedure (`0096_sp_run_executions_validate_token.sql`) returns the column as `o_is_valid` — not `o_valid`. The TypeScript field mismatch meant the boolean was always `undefined`, which is not `=== true`, so every LLM analysis result from the runner was silently rejected with HTTP 401 before reaching the DB write. No LLM analysis data would ever be stored.
+- Fix: Renamed `TokenRow` interface field from `o_valid` to `o_is_valid` to match the stored procedure's actual return column. Verified against the email-validate route which already used the correct field name.
+- Code change:
+  ```typescript
+  // Before (broken):
+  type TokenRow = { o_valid: boolean };
+  const valid = (tokenRows as TokenRow[])[0]?.o_valid === true;
+  // After (fixed):
+  type TokenRow = { o_is_valid: boolean };
+  const valid = (tokenRows as TokenRow[])[0]?.o_is_valid === true;
+  ```
+- Regression test added: "returns 401 when token is invalid (o_is_valid = false)" — explicitly verifies that the `o_is_valid` field is what drives the auth decision, preventing this field-name bug from silently reappearing.
+
+**BUG-2 (Minor / Documentation) — JSDoc friction_score threshold mismatch**
+- File: `apps/runner/src/execution-manager.ts`, line 791
+- Problem: The JSDoc for `runLlmPostStep` stated "fires only when... friction_score > 0" but the actual code gate on line 819 checked `result.friction_score > 0.1`. Any developer reading the doc to understand when LLM analysis triggers would have incorrect information.
+- Fix: Updated doc comment from `friction_score > 0` to `friction_score > 0.1`.
+
+**BUG-3 (Cosmetic / Documentation) — Typo `lllm_analysis` in JSDoc**
+- File: `apps/runner/src/execution-manager.ts`, line 795
+- Problem: The doc comment referred to "the lllm_analysis callback type" — triple-l, not double-l.
+- Fix: Corrected to "the llm_analysis callback type".
+
+#### New Regression Tests Added
+
+Five tests were added to `apps/dashboard-web/app/api/runner/callback/route.test.ts` covering the `llm_analysis_result` branch which had zero test coverage before this review:
+
+| Test | What it guards |
+|------|----------------|
+| Returns 400 on missing required fields | Zod schema validation on llm_analysis_result payload |
+| Returns 401 when `o_is_valid = false` | BUG-1 regression — confirms correct field name drives auth |
+| Returns 200 + correct proc args on valid token | Happy path: all proc parameters mapped correctly |
+| Stores null result_json for error status | Error payloads stored correctly without result data |
+| Returns 500 on DB write failure | DB error propagation works correctly |
+
+The callback route test file grew from 26 to 31 tests.
+
+#### Files Modified
+
+| File | Change |
+|------|--------|
+| `apps/dashboard-web/app/api/runner/callback/route.ts` | Fixed `o_valid` → `o_is_valid` token field (BUG-1) |
+| `apps/dashboard-web/app/api/runner/callback/route.test.ts` | Added 5 new llm_analysis_result regression tests |
+| `apps/runner/src/execution-manager.ts` | Fixed JSDoc threshold text (BUG-2) and typo (BUG-3) |
+
+#### Lessons Learned
+
+- **Always compare stored proc return column names to TypeScript field names when reading from DB results.** A single letter difference (`o_valid` vs `o_is_valid`) silently breaks auth — there is no compile-time check because the result is typed as `unknown[]` then cast. The existing convention (`o_is_valid` for boolean flags) should be followed consistently; any deviation requires an explicit comment.
+- **New callback payload types require dedicated test coverage before merge.** The llm_analysis_result branch was added but not tested, leaving the critical token-validation bug undetected. Callback branches should each have: 400 (bad payload), 401 (bad token), 200 (happy path), 500 (DB failure).
+- **Cross-reference similar implementations for field naming.** The email-validate route (`/api/runner/email-validate/route.ts`) used the same validate-token proc correctly (`o_is_valid`). Checking the parallel implementation would have caught the mismatch at PR time.
+- **Document threshold values precisely.** The `> 0.1` friction threshold exists to prevent trivial/noise executions from triggering LLM analysis. If changed in code, the doc comment must be updated in the same commit or the discrepancy will mislead future maintainers.
+
+---
+
 ### Phase 9 Code Review — Bugs Found and Fixed
 
 **Task Reference**: Phase 9 Reporting & Narrative Layer — post-implementation code review
