@@ -12,6 +12,12 @@ import {
   type RunExecution,
 } from '@/app/actions/runs';
 import { listPendingApprovals, decideApproval, type ApprovalItem } from '@/app/actions/approvals';
+import {
+  listEmailValidationRuns,
+  listEmailValidationChecks,
+  type EmailValidationRunRecord,
+  type EmailValidationCheckRecord,
+} from '@/app/actions/emailValidation';
 import { Button } from '@/components/ui/button';
 import {
   ArrowLeft,
@@ -23,6 +29,10 @@ import {
   Clock,
   SkipForward,
   Bell,
+  Mail,
+  ChevronDown,
+  ChevronRight,
+  Link2,
 } from 'lucide-react';
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
@@ -141,6 +151,9 @@ export default function RunDetailPage({
   const [run, setRun] = useState<RunDetail | null>(null);
   const [executions, setExecutions] = useState<RunExecution[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalItem[]>([]);
+  const [emailValRuns, setEmailValRuns] = useState<EmailValidationRunRecord[]>([]);
+  const [emailValChecks, setEmailValChecks] = useState<Record<number, EmailValidationCheckRecord[]>>({});
+  const [expandedEmailRun, setExpandedEmailRun] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -159,11 +172,26 @@ export default function RunDetailPage({
       } else {
         setError(runRes.error ?? 'Failed to load run');
       }
-      if (execRes.success && execRes.executions) {
-        setExecutions(execRes.executions);
-      }
+      const loadedExecs = execRes.success ? (execRes.executions ?? []) : [];
+      if (execRes.success) setExecutions(loadedExecs);
       if (approvalRes.success && approvalRes.approvals) {
         setPendingApprovals(approvalRes.approvals);
+      }
+
+      // Load email validation runs for all executions with email-sending flows
+      const emailFlows = ['registration', 'checkout'];
+      const emailExecs = loadedExecs.filter(e => emailFlows.includes(e.flow_name));
+      if (emailExecs.length > 0) {
+        const allEmailValRuns: EmailValidationRunRecord[] = [];
+        await Promise.all(
+          emailExecs.map(async exec => {
+            const evRes = await listEmailValidationRuns(exec.id);
+            if (evRes.success && evRes.runs) {
+              allEmailValRuns.push(...evRes.runs);
+            }
+          }),
+        );
+        setEmailValRuns(allEmailValRuns);
       }
     } catch {
       setError('An error occurred while loading run');
@@ -185,6 +213,20 @@ export default function RunDetailPage({
     }, 5000);
     return () => clearInterval(interval);
   }, [run, loadData]);
+
+  async function handleExpandEmailRun(evRunId: number) {
+    if (expandedEmailRun === evRunId) {
+      setExpandedEmailRun(null);
+      return;
+    }
+    setExpandedEmailRun(evRunId);
+    if (!emailValChecks[evRunId]) {
+      const checksRes = await listEmailValidationChecks(evRunId);
+      if (checksRes.success && checksRes.checks) {
+        setEmailValChecks(prev => ({ ...prev, [evRunId]: checksRes.checks! }));
+      }
+    }
+  }
 
   async function handleStartRun() {
     if (!run) return;
@@ -383,6 +425,88 @@ export default function RunDetailPage({
                       </div>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* Email Validation Results panel */}
+            {emailValRuns.length > 0 && (
+              <div className="bg-white rounded-lg border border-zinc-200 overflow-hidden">
+                <div className="px-4 py-3 border-b border-zinc-200 bg-zinc-50 flex items-center gap-2">
+                  <Mail className="w-4 h-4 text-zinc-500" />
+                  <h2 className="text-sm font-semibold text-zinc-700">Email Validation ({emailValRuns.length})</h2>
+                </div>
+                <div className="divide-y divide-zinc-100">
+                  {emailValRuns.map(evRun => {
+                    const isExpanded = expandedEmailRun === evRun.id;
+                    const checks = emailValChecks[evRun.id] ?? [];
+                    const statusColor =
+                      evRun.status === 'delivered' ? 'text-green-700 bg-green-50' :
+                      evRun.status === 'timed_out' || evRun.status === 'not_found' ? 'text-amber-700 bg-amber-50' :
+                      evRun.status === 'error' ? 'text-red-700 bg-red-50' :
+                      'text-zinc-600 bg-zinc-100';
+                    return (
+                      <div key={evRun.id}>
+                        <button
+                          onClick={() => handleExpandEmailRun(evRun.id)}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-zinc-50 transition-colors"
+                        >
+                          {isExpanded ? <ChevronDown className="w-4 h-4 text-zinc-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-zinc-400 shrink-0" />}
+                          <Mail className="w-4 h-4 text-blue-500 shrink-0" />
+                          <span className="flex-1 text-xs font-medium text-zinc-900 truncate">
+                            {evRun.inbox_name}
+                            <span className="ml-2 font-mono text-zinc-400">{evRun.correlation_token}</span>
+                          </span>
+                          <span className={`inline-flex items-center text-xs font-medium px-2 py-0.5 rounded-full ${statusColor}`}>
+                            {evRun.status}
+                          </span>
+                          {evRun.delivery_latency_ms !== null && (
+                            <span className="text-xs text-zinc-400 shrink-0 ml-2">
+                              {evRun.delivery_latency_ms < 1000
+                                ? `${evRun.delivery_latency_ms}ms`
+                                : `${(evRun.delivery_latency_ms / 1000).toFixed(1)}s`}
+                            </span>
+                          )}
+                        </button>
+                        {isExpanded && (
+                          <div className="px-10 pb-3 space-y-1">
+                            {evRun.error_message && (
+                              <p className="text-xs text-red-600 mb-2">{evRun.error_message}</p>
+                            )}
+                            {checks.length === 0 && (
+                              <p className="text-xs text-zinc-400">No check results yet.</p>
+                            )}
+                            {checks.map(check => {
+                              const checkColor =
+                                check.status === 'passed' ? 'text-green-700' :
+                                check.status === 'failed' ? 'text-red-700' :
+                                check.status === 'skipped' ? 'text-zinc-400' :
+                                'text-amber-700';
+                              return (
+                                <div key={check.id} className="flex items-start gap-2 text-xs">
+                                  <span className={`font-mono shrink-0 w-3 mt-0.5 ${checkColor}`}>
+                                    {check.status === 'passed' ? '✓' : check.status === 'skipped' ? '–' : '✗'}
+                                  </span>
+                                  <span className="text-zinc-500 shrink-0 w-28">{check.check_type}</span>
+                                  <span className={`${checkColor} flex-1`}>{check.detail ?? '—'}</span>
+                                  {check.url_tested && (
+                                    <a
+                                      href={check.url_tested}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-blue-500 hover:underline shrink-0"
+                                    >
+                                      <Link2 className="w-3 h-3" />
+                                    </a>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}

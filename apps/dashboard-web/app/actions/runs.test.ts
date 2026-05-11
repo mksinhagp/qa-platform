@@ -29,6 +29,15 @@ vi.mock('@qa-platform/config', () => ({
   loadEnv: vi.fn(() => ({ RUNNER_API_BASE_URL: 'http://runner:4000' })),
 }));
 
+vi.mock('./sites', () => ({
+  getSite: vi.fn().mockResolvedValue({
+    success: true,
+    site: { id: 10, name: 'Demo Site', base_url: 'https://demo.example.com', is_active: true },
+  }),
+  listSites: vi.fn().mockResolvedValue({ success: true, sites: [] }),
+  listSiteEnvironments: vi.fn().mockResolvedValue({ success: true, environments: [] }),
+}));
+
 const AUTH_CTX = { operatorId: 42, sessionId: 1 };
 
 // ─── Sample rows ─────────────────────────────────────────────────────────────
@@ -310,7 +319,11 @@ describe('createRun', () => {
   };
 
   it('creates run and returns runId', async () => {
+    // sp_runs_insert → returns run id=5
     vi.mocked(invokeProcWrite).mockResolvedValueOnce([{ o_id: 5, o_status: 'draft' }]);
+    // sp_run_executions_insert calls (one per persona × browser × flow × device × network)
+    vi.mocked(invokeProcWrite).mockResolvedValue([{ o_id: 100 }]);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 202 }));
 
     const result = await createRun(VALID_DATA);
 
@@ -326,6 +339,8 @@ describe('createRun', () => {
 
   it('stores config as JSON string', async () => {
     vi.mocked(invokeProcWrite).mockResolvedValueOnce([{ o_id: 5, o_status: 'draft' }]);
+    vi.mocked(invokeProcWrite).mockResolvedValue([{ o_id: 100 }]);
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 202 }));
 
     await createRun(VALID_DATA);
 

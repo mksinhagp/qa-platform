@@ -8,9 +8,12 @@ const nextConfig: NextConfig = {
     "@qa-platform/auth",
     "@qa-platform/vault",
     "@qa-platform/config",
+    "@qa-platform/email",
     "argon2",
     "@mapbox/node-pre-gyp",
     "pg",
+    "imap-simple",
+    "mailparser",
   ],
 };
 

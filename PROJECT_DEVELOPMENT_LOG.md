@@ -2790,3 +2790,114 @@ Comprehensive code review of all packages, apps, database scripts, and Docker co
 
 ---
 
+## Phase 5 — Approval-Gated Checkout + Sandbox Payments + Email Validation
+
+**Date:** 2026-05-10
+**Status:** Complete
+**Test count:** 164 (up from 128 at start of session)
+
+### Scope
+
+Phase 5 delivers three interconnected capabilities:
+
+1. **Approval-gated checkout flow** with sandbox card fill for yugal-kunj
+2. **Email validation module** (`@qa-platform/email`) — IMAP polling, delivery timing, assertions, link reachability, brand checks
+3. **Dashboard UI** — run detail page extended with email validation results panel
+
+### DB Changes
+
+#### Migration 0014 — email_validation_tables.sql
+
+New tables:
+- `email_inboxes` — IMAP connection config per site (credentials reference vault)
+- `email_validation_runs` — one row per triggered email check (linked to execution)
+- `email_validation_checks` — one row per assertion check result (linked to validation run)
+
+#### Stored Procedures (0089–0095)
+
+| # | Name | Purpose |
+|---|------|---------|
+| 0089 | `sp_email_validation_runs_insert` | Create a new validation run record |
+| 0090 | `sp_email_validation_runs_update` | Update status/overall_passed after validation completes |
+| 0091 | `sp_email_validation_checks_insert` | Insert individual check result row |
+| 0092 | `sp_email_validation_runs_get_by_execution` | Retrieve all validation runs for an execution |
+| 0093 | `sp_email_validation_checks_list` | List check rows for a validation run |
+| 0094 | `sp_payment_profiles_list` | List payment profiles (sandbox cards) per site |
+| 0095 | `sp_email_inboxes_list` | List IMAP inbox configs for a site |
+
+### New Package: @qa-platform/email
+
+Located at `packages/email/`. Modules:
+
+| File | Responsibility |
+|------|---------------|
+| `src/types.ts` | All shared interfaces: `ImapConfig`, `ParsedEmail`, `DeliveryResult`, `CheckResult`, `EmailAssertionSpec`, `EmailValidationResult` |
+| `src/correlationToken.ts` | `generateCorrelationToken()`, `buildTestEmailAddress()`, `extractCorrelationToken()` — plus-suffix token isolation |
+| `src/imap.ts` | `fetchEmailByToken()` — imap-simple + mailparser wrapper; one-connection-per-check |
+| `src/delivery.ts` | `waitForDelivery()` — interval polling loop with configurable timeout |
+| `src/assertions.ts` | `runEmailAssertions()` — subject, body, link_extract, brand_logo, brand_footer checks via cheerio |
+| `src/linkChecker.ts` | `checkLinkReachability()` — HTTP HEAD per extracted link, redirect-following, timeout |
+| `src/validator.ts` | `validateEmail()` — orchestrates full pipeline: delivery → assertions → link checks |
+| `src/index.ts` | Barrel re-export |
+
+Test file: `packages/email/src/email.test.ts` — 36 tests covering all modules, with IMAP fully mocked via `vi.mock('./imap.js')`.
+
+### Checkout Flow — yugal-kunj
+
+`sites/yugal-kunj/flows/checkout.ts` — new flow implementing:
+
+- Browse to checkout page
+- Approval gate: submits approval request via `@qa-platform/approvals`, polls for decision
+- On approval: reads sandbox card from vault (`sp_payment_profiles_list`), fills card form, submits
+- Stores order confirmation number from post-payment page
+
+`sites/yugal-kunj/flows/index.ts` — exports `checkoutFlow` alongside existing `browseFlow` and `registrationFlow`.
+
+### Runner Integration
+
+`apps/dashboard-web/app/api/runner/email-validate/route.ts` — POST endpoint called by runner after a registration or checkout execution completes:
+- Validates API key
+- Triggers `triggerEmailValidation()` server action
+- Returns validation run ID for runner to track
+
+`apps/dashboard-web/app/actions/emailValidation.ts` — server actions:
+- `triggerEmailValidation(executionId, token, spec)` — inserts validation run, calls `validateEmail()` pipeline, persists all check results
+- `listEmailValidationRuns(runId)` — retrieve all validation runs for a run
+- `getEmailValidationChecks(validationRunId)` — retrieve check results for a validation run
+
+### Dashboard UI Updates
+
+`apps/dashboard-web/app/dashboard/runs/[runId]/page.tsx`:
+- State: `emailValidationRuns`, `emailChecksMap`, `expandedEmailRunId`
+- `loadData` fetches validation runs in parallel with execution list
+- `handleExpandEmailRun` lazy-loads check rows on first expand
+- Email validation panel appended to run detail section: collapsible per-run rows with badge (passed/failed/pending), expandable check details table showing `check_type`, `status`, `detail`, `url_tested`, `http_status`
+
+`apps/dashboard-web/next.config.ts` — added `@qa-platform/email` and `@qa-platform/approvals` to `serverExternalPackages`.
+`apps/dashboard-web/package.json` — added `@qa-platform/email: "workspace:*"` dependency.
+
+### Files Created / Modified
+
+**New files:**
+- `db/migrations/0014_email_validation_tables.sql`
+- `db/procs/0089_sp_email_validation_runs_insert.sql`
+- `db/procs/0090_sp_email_validation_runs_update.sql`
+- `db/procs/0091_sp_email_validation_checks_insert.sql`
+- `db/procs/0092_sp_email_validation_runs_get_by_execution.sql`
+- `db/procs/0093_sp_email_validation_checks_list.sql`
+- `db/procs/0094_sp_payment_profiles_list.sql`
+- `db/procs/0095_sp_email_inboxes_list.sql`
+- `packages/email/` (entire package — 9 source files + package.json + tsconfig.json)
+- `sites/yugal-kunj/flows/checkout.ts`
+- `apps/dashboard-web/app/actions/emailValidation.ts`
+- `apps/dashboard-web/app/api/runner/email-validate/route.ts`
+
+**Modified files:**
+- `apps/dashboard-web/app/actions/runs.test.ts` (test fix from earlier in session)
+- `apps/dashboard-web/app/dashboard/runs/[runId]/page.tsx`
+- `apps/dashboard-web/next.config.ts`
+- `apps/dashboard-web/package.json`
+- `sites/yugal-kunj/flows/index.ts`
+
+---
+
