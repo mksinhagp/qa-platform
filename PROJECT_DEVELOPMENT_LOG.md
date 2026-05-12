@@ -6,6 +6,110 @@ This log captures all major decisions and changes made during development of the
 
 ---
 
+## May 11, 2026 — Phase 13 Complete: Expansion Readiness
+
+### Phase 13 Summary
+
+**Date**: May 11, 2026
+**Tasks**: 13.1 (New Site Template) and 13.2 (Multi-Site Tenant Isolation Review) executed in parallel.
+
+#### All Files Produced
+
+| File | Type | Phase |
+|---|---|---|
+| `sites/_template/rules.ts` | Site rules template | 13.1 |
+| `sites/_template/api-endpoints.ts` | API endpoints template | 13.1 |
+| `sites/_template/flows/index.ts` | Flows index template | 13.1 |
+| `sites/_template/flows/browse.ts` | Browse flow template | 13.1 |
+| `sites/_template/flows/registration.ts` | Registration flow template | 13.1 |
+| `sites/_template/flows/checkout.ts` | Checkout flow template | 13.1 |
+| `sites/_template/README.md` | Template operator guide | 13.1 |
+| `docs/decisions/010-multi-site-tenant-isolation.md` | Architecture Decision Record | 13.2 |
+| `master-plan-qa-automation.md` | Updated Phase 13 status to ✅ Complete | — |
+
+---
+
+### Phase 13.1 Completed: New Site Setup Template
+
+**Task Reference**: Master Plan Phase 13.1
+**Time**: 23:49 EDT
+
+#### Objective
+
+Create a copy-paste-ready scaffold directory (`sites/_template/`) that an operator can duplicate and fill in to onboard any new site onto the platform, without needing to reverse-engineer the Yugal Kunj implementation.
+
+#### Template Contents
+
+| File | Lines | Purpose |
+|---|---|---|
+| `rules.ts` | 326 | Annotated `SiteRules` covering all 11 schema sections; every optional field present with `// TODO:` guidance and pre-filled defaults |
+| `api-endpoints.ts` | 215 | `ApiEndpointConfig[]` stubs for health, auth, listings, registration, payment, and admin; DevTools discovery guidance included |
+| `flows/index.ts` | 65 | Exact `Record<string, FlowDefinition>` + `apiEndpoints` re-export pattern; commented-out admin flow stubs with add/remove instructions |
+| `flows/browse.ts` | 158 | 6-step browse flow with friction telemetry; all selectors as `REPLACE_ME` with `// TODO:` annotations |
+| `flows/registration.ts` | 299 | 8-step registration flow with persona-aware form fill, accessibility check, approval gate, email validation step |
+| `flows/checkout.ts` | 328 | 8-step checkout with both Stripe iframe and plain-input payment form paths; sandbox card guidance |
+| `README.md` | 108 | Quick Start bash snippet, file map, itemized TODO checklist, build note, link to `docs/runbooks/site-onboarding.md` |
+
+#### Design Decisions
+
+1. **`REPLACE_ME` as placeholder value, not empty string**: Forces Zod `base_url` URL validation to fail until the operator fills in a real URL. This is intentional — the template cannot typecheck to green until real values are supplied, which prevents accidental deployment of a half-configured site.
+2. **Both Stripe iframe and plain-input paths in checkout.ts**: The template must be useful for sites using either iframe-based payment tokenization or direct field injection. Both code paths are included with clear `// TODO:` annotations for which to keep.
+3. **Template matched exactly to yugal-kunj structure**: Import paths, export patterns, `FlowDefinition` usage, `runner.executionContext` access, and friction signal recording are all copied from the live implementation so the template is immediately buildable.
+4. **siteId naming constraint documented in README**: `^[a-z0-9][a-z0-9_-]*$` regex enforced by `loader.ts` path traversal guard — operators must know this before naming their site directory.
+
+---
+
+### Phase 13.2 Completed: Multi-Site Tenant Isolation Review
+
+**Task Reference**: Master Plan Phase 13.2
+**Time**: 23:44 EDT
+
+#### Objective
+
+Analyze data isolation between sites at the DB, application, and vault layers, identify gaps, and produce a pre-second-site checklist.
+
+#### Key Findings (ADR 010)
+
+**Strong isolation (by design or by FK chain):**
+- `sites` and `site_environments` are the root tenant boundary; all downstream tables (runs → run_executions → run_steps → artifacts → friction_signals) are transitively scoped via FK cascade.
+- `site_credentials` has explicit `site_id` + `site_environment_id` columns.
+- LLM analysis results and email validation results are transitively isolated via `run_execution_id → run_id → site_id`.
+
+**Gaps identified:**
+
+| Component | Gap | Severity |
+|---|---|---|
+| `operator_role_assignments` | No `site_id` column — roles apply platform-wide; operator with `runs.read` can query any site | Critical (blocks multi-operator) |
+| `secret_records.owner_scope` | String convention only, no FK enforcement — application must enforce scope correctly | Medium |
+| `approval_policies` | Global table, no `site_id` — by design for single-operator but limits per-site policy customization | Acceptable for v1 |
+| `audit_logs` | No `site_id` — any operator can query all audit events | Medium (moot with single operator) |
+| `sp_runs_list` called with `i_site_id = NULL` | Returns all sites; application must enforce that non-admin operators always pass their site_id | Medium |
+| Vault | Single master password unlocks secrets for all sites; no per-site vault isolation | Acceptable for v1 single-operator |
+| `payment_profiles` / `email_inboxes` | No `site_id` column (global resources bound via junction tables) | Acceptable — binding tables enforce site-level assignment |
+
+**Pre-second-site checklist** (7 items, from ADR 010):
+1. Add `site_id` column to `operator_role_assignments` (new migration)
+2. Add `site_id`-scoped capability checks in guards for `runs.read`, `runs.write`, `credentials.read`, `credentials.write`
+3. Update `sp_runs_list` and related run-query procs to enforce `i_site_id` when caller lacks `admin` role
+4. Validate `secret_records.owner_scope` at the application layer in all credential create/read actions
+5. Add `site_id` to audit log entries for site-specific operations
+6. Register new site in DB and create its site directory/flows/rules before any test run
+7. Verify no Yugal Kunj credentials, payment profiles, or email inboxes are accidentally re-used by the new site
+
+#### Decisions Made
+
+- **Site-scoped RBAC is the critical blocker**: Adding a second site alongside Yugal Kunj on the same platform with different operators requires `operator_role_assignments.site_id`. Without it, any operator with a `runs.read` role sees all sites.
+- **Global tables are by design**: `approval_policies`, `personas`, `device_profiles`, and `network_profiles` are intentionally global and shared across sites. This is correct — these are platform-level shared resources, not tenant data.
+- **Vault single-master-password model is acceptable for v1 single-operator**: Vault isolation per site would require separate vault instances or per-site key wrapping, which is out of scope for v1. Documented as a known limitation in ADR 010.
+- **Phase 13 does not implement the RBAC fixes**: The review surfaces the gaps and documents the required changes. Actual implementation of site-scoped RBAC is deferred to Phase 14 (Generic Registration Site Model) or a dedicated security hardening phase, where the broader site capability model will also be redesigned.
+
+#### Lessons Learned
+
+- **FK chains provide strong transitive isolation but are invisible in RBAC**: The DB correctly isolates run data by site through FK chains, but nothing prevents an authorized operator from listing runs across all sites if the stored proc caller omits the site_id filter. DB isolation and application-layer authorization are complementary, not substitutes.
+- **String-convention scoping (owner_scope) is a latent risk**: `secret_records.owner_scope` is the only tenant-scoping mechanism for secrets, and it is enforced by application convention alone. This is workable for a single developer but needs application-layer enforcement hardening before a second operator with separate site access is added.
+
+---
+
 ## May 11, 2026 — Phase 11.4 and Phase 12 Complete
 
 ### Phase 11.4 Completed: Disaster Recovery Runbook
