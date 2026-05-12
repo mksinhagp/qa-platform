@@ -41,7 +41,7 @@ const rules: SiteRules = {
   // TODO: Primary URL under test (staging preferred).
   //       Must be a valid absolute URL including protocol.
   //       Example: 'https://staging.example.org'
-  base_url: 'https://YOUR_SITE_URL',
+  base_url: 'https://REPLACE_ME',
 
   // ─── Capacity ──────────────────────────────────────────────────────────────
   // Controls how the runner oracle evaluates booking/registration limits.

@@ -50,7 +50,7 @@ export const registrationFlow: FlowDefinition = {
 
         // TODO: Replace with the listing/browse page URL for this site.
         //       Should match the URL used in browse.ts navigate_to_site step.
-        await runner.goto('https://YOUR_SITE_URL/LISTING_PATH');
+        await runner.goto('https://REPLACE_ME/REPLACE_ME_PATH');
 
         // TODO: Update the wait condition to match the site's loading pattern.
         await runner.page.waitForFunction(
@@ -196,11 +196,11 @@ export const registrationFlow: FlowDefinition = {
         // TODO: Replace selector with form_dob from rules.ts.
         //       Remove this block if the site does not collect date of birth.
         const dobField = await runner.page.$(
-          'input[name="dob"], input[name="dateOfBirth"], REPLACE_ME',
+          'input[name="dob"], input[name="dateOfBirth"], input[placeholder*="birth"], REPLACE_ME',
         );
         if (dobField) {
           await runner.type(
-            'input[name="dob"], input[name="dateOfBirth"], REPLACE_ME',
+            'input[name="dob"], input[name="dateOfBirth"], input[placeholder*="birth"], REPLACE_ME',
             TEST_REGISTRANT.dob,
           );
         }

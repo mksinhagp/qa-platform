@@ -36,7 +36,7 @@ export const browseFlow: FlowDefinition = {
         //       For SPA with hash:    'https://example.org/#/camp/center'
         //       The runner also exposes runner.executionContext.baseUrl which
         //       resolves to the environment's base URL from the dashboard config.
-        await runner.goto('https://YOUR_SITE_URL/LISTING_PATH');
+        await runner.goto('https://REPLACE_ME/REPLACE_ME_PATH');
 
         // TODO: Update this waitForFunction to match the site's loading pattern.
         //       For React SPAs with a root div:

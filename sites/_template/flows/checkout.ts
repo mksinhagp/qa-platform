@@ -201,11 +201,11 @@ export const checkoutFlow: FlowDefinition = {
           // CVV / CVC
           // TODO: Replace selector with the actual CVV input on this site.
           const cvvInput = await runner.page.$(
-            'input[name="cvc"], input[name="cvv"], input[placeholder*="CVV"], REPLACE_ME',
+            'input[name="cvc"], input[name="cvv"], input[placeholder*="CVC"], input[placeholder*="CVV"], REPLACE_ME',
           );
           if (cvvInput) {
             await runner.type(
-              'input[name="cvc"], input[name="cvv"], input[placeholder*="CVV"], REPLACE_ME',
+              'input[name="cvc"], input[name="cvv"], input[placeholder*="CVC"], input[placeholder*="CVV"], REPLACE_ME',
               card.cvv,
             );
           }
@@ -226,11 +226,11 @@ export const checkoutFlow: FlowDefinition = {
         // ZIP / postal code
         // TODO: Remove this block if the site does not require a billing ZIP.
         const zipInput = await runner.page.$(
-          'input[name="zip"], input[name="postal"], input[placeholder*="ZIP"], REPLACE_ME',
+          'input[name="zip"], input[name="postal"], input[placeholder*="ZIP"], input[placeholder*="Postal"], REPLACE_ME',
         );
         if (zipInput) {
           await runner.type(
-            'input[name="zip"], input[name="postal"], input[placeholder*="ZIP"], REPLACE_ME',
+            'input[name="zip"], input[name="postal"], input[placeholder*="ZIP"], input[placeholder*="Postal"], REPLACE_ME',
             card.zip,
           );
         }

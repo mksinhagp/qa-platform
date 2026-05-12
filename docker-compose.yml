@@ -3,13 +3,13 @@ services:
     image: postgres:16-alpine
     container_name: qa-platform-postgres
     environment:
-      POSTGRES_DB: qa_platform
-      POSTGRES_USER: qa_user
-      POSTGRES_PASSWORD: qa_password
+      POSTGRES_DB: ${POSTGRES_DB:-qa_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-qa_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - pg_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U qa_user -d qa_platform"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-qa_user} -d ${POSTGRES_DB:-qa_platform}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -22,11 +22,11 @@ services:
       dockerfile: docker/migrator/Dockerfile
     container_name: qa-platform-migrator
     environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: qa_platform
-      POSTGRES_USER: qa_user
-      POSTGRES_PASSWORD: qa_password
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-qa_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-qa_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     depends_on:
       postgres:
         condition: service_healthy
@@ -41,11 +41,11 @@ services:
     environment:
       NODE_ENV: production
       DASHBOARD_PORT: 3000
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: qa_platform
-      POSTGRES_USER: qa_user
-      POSTGRES_PASSWORD: qa_password
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-qa_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-qa_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       DASHBOARD_SESSION_SECRET: ${DASHBOARD_SESSION_SECRET:?DASHBOARD_SESSION_SECRET is required}
     ports:
       - "3000:3000"
@@ -104,11 +104,11 @@ services:
     profiles:
       - backup
     environment:
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: qa_platform
-      POSTGRES_USER: qa_user
-      POSTGRES_PASSWORD: qa_password
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-qa_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-qa_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       BACKUP_DIR: /backups
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
     volumes:

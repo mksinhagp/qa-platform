@@ -267,7 +267,7 @@ docker run --rm -v websitetester_backups:/backups alpine ls -lh /backups
 **Symptoms:**
 
 - Application returns 500 errors with database-related messages
-- Missing rows in key tables (e.g., `sites`, `operators`, `test_runs`)
+- Missing rows in key tables (e.g., `sites`, `operators`, `runs`)
 - Postgres logs show `invalid page` errors or checksum failures
 - Migration runner reports unexpected schema state
 
@@ -280,7 +280,7 @@ docker exec -it qa-platform-postgres psql -U qa_user -d qa_platform
 # Check table counts for key tables
 SELECT 'sites' AS tbl, count(*) FROM sites
 UNION ALL SELECT 'operators', count(*) FROM operators
-UNION ALL SELECT 'test_runs', count(*) FROM test_runs
+UNION ALL SELECT 'runs', count(*) FROM runs
 UNION ALL SELECT 'secret_records', count(*) FROM secret_records;
 
 # Check for Postgres errors in container logs
@@ -481,7 +481,7 @@ If a run was in progress when the runner crashed, its status will remain `runnin
 
 ```bash
 docker exec -it qa-platform-postgres psql -U qa_user -d qa_platform \
-  -c "UPDATE test_runs SET status='failed', error_message='Runner crashed mid-run — marked failed during recovery', completed_at=NOW() WHERE status='running';"
+  -c "UPDATE runs SET status='failed', notes='Runner crashed mid-run — marked failed during recovery', completed_at=NOW() WHERE status='running';"
 ```
 
 Verify the runner is accepting new work:

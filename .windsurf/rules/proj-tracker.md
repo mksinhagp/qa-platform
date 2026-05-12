@@ -1,7 +1,7 @@
 ---
 trigger: always_on
 ---
-
+When SQL files are coded and related database is available propagate the SQL to the database via MCP or other means necessary. Make Database changes are updated in the tracker and note made.
 Update the project development log with any changes made. 
 Capture the date, time, and a brief description of the changes.
 Capture the files modified and the changes made.

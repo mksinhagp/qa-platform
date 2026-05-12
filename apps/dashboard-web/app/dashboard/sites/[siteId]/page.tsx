@@ -35,13 +35,30 @@ import { Checkbox } from '@/components/ui/checkbox';
 import {
   Globe, Layers, Key, CreditCard, Mail, Edit2, Plus, Trash2, Save,
   CheckCircle, XCircle, Loader2, X, ArrowLeft,
+  Settings2, GitBranch, MousePointer,
 } from 'lucide-react';
+import {
+  listCapabilities,
+  upsertCapability,
+  batchUpsertCapabilities,
+  listFlowMappings,
+  upsertFlowMapping,
+  listSelectorEntries,
+  createSelectorEntry,
+  updateSelectorEntry,
+  type SiteCapability,
+  type SiteFlowMapping,
+  type SiteSelectorEntry,
+} from '@/app/actions/capabilities';
 
 // ─── Tab definition ───────────────────────────────────────────────────────────
 
 const TABS = [
   { id: 'overview',         label: 'Overview',        icon: Globe },
   { id: 'environments',     label: 'Environments',    icon: Layers },
+  { id: 'capabilities',     label: 'Capabilities',    icon: Settings2 },
+  { id: 'flows',            label: 'Flows',           icon: GitBranch },
+  { id: 'selectors',        label: 'Selectors',       icon: MousePointer },
   { id: 'credentials',      label: 'Credentials',     icon: Key },
   { id: 'payment-profiles', label: 'Payment Profiles',icon: CreditCard },
   { id: 'email-inboxes',    label: 'Email Inboxes',   icon: Mail },
@@ -51,7 +68,7 @@ type TabId = typeof TABS[number]['id'];
 
 function TabBar({ active, siteId }: { active: TabId; siteId: string }) {
   return (
-    <div className="flex gap-1 border-b border-zinc-200 mb-6">
+    <div className="flex gap-1 border-b border-zinc-200 mb-6 overflow-x-auto">
       {TABS.map(tab => {
         const Icon = tab.icon;
         const isActive = tab.id === active;
@@ -539,6 +556,435 @@ function BindingTab<TResource extends { id: number }>({
   );
 }
 
+// ─── Capabilities tab ────────────────────────────────────────────────────────
+
+const WELL_KNOWN_CAPABILITIES = [
+  { key: 'registration', label: 'Registration' },
+  { key: 'login', label: 'Login' },
+  { key: 'email_verification', label: 'Email Verification' },
+  { key: 'password_reset', label: 'Password Reset' },
+  { key: 'payment', label: 'Payment / Checkout' },
+  { key: 'donation', label: 'Donations' },
+  { key: 'profile_management', label: 'Profile Management' },
+  { key: 'search', label: 'Search' },
+  { key: 'newsletter', label: 'Newsletter Signup' },
+  { key: 'contact_form', label: 'Contact Form' },
+];
+
+function CapabilitiesTab({ siteId }: { siteId: number }) {
+  const [caps, setCaps] = useState<SiteCapability[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [localState, setLocalState] = useState<Record<string, boolean>>({});
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const result = await listCapabilities(siteId);
+    setLoading(false);
+    if (result.success && 'capabilities' in result) {
+      setCaps(result.capabilities);
+      const state: Record<string, boolean> = {};
+      result.capabilities.forEach(c => { state[c.capability_key] = c.is_enabled; });
+      setLocalState(state);
+    } else if (!result.success) {
+      setError(result.error);
+    }
+  }, [siteId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  function toggle(key: string) {
+    setLocalState(prev => {
+      const updated = { ...prev, [key]: !prev[key] };
+      setDirty(true);
+      return updated;
+    });
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+    const capabilities = WELL_KNOWN_CAPABILITIES.map(c => ({
+      key: c.key,
+      enabled: localState[c.key] ?? false,
+    }));
+    const result = await batchUpsertCapabilities({ site_id: siteId, capabilities });
+    setSaving(false);
+    if (result.success) {
+      setDirty(false);
+      load();
+    } else if (!result.success) {
+      setError(result.error);
+    }
+  }
+
+  if (loading) return <div className="flex items-center text-zinc-500 text-sm gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading...</div>;
+  if (error) return <div className="text-red-600 text-sm">{error}</div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h2 className="text-lg font-semibold text-zinc-900">Site Capabilities</h2>
+        <Button size="sm" onClick={handleSave} disabled={saving || !dirty}>
+          {saving ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Save className="w-4 h-4 mr-1" />}
+          Save
+        </Button>
+      </div>
+      <p className="text-sm text-zinc-500">Toggle the capabilities this site supports. This drives which test flows are available.</p>
+      <div className="grid grid-cols-2 gap-3">
+        {WELL_KNOWN_CAPABILITIES.map(c => (
+          <label
+            key={c.key}
+            className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+              localState[c.key]
+                ? 'border-blue-300 bg-blue-50'
+                : 'border-zinc-200 bg-white hover:bg-zinc-50'
+            }`}
+          >
+            <Checkbox
+              checked={localState[c.key] ?? false}
+              onCheckedChange={() => toggle(c.key)}
+            />
+            <div>
+              <div className="text-sm font-medium text-zinc-900">{c.label}</div>
+              <div className="text-xs text-zinc-400 font-mono">{c.key}</div>
+            </div>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Flow Mappings tab ───────────────────────────────────────────────────────
+
+const WELL_KNOWN_FLOWS = [
+  { key: 'registration', name: 'Registration' },
+  { key: 'login', name: 'Login' },
+  { key: 'email_verification', name: 'Email Verification' },
+  { key: 'password_reset', name: 'Password Reset' },
+  { key: 'checkout', name: 'Checkout' },
+  { key: 'donation', name: 'Donation' },
+  { key: 'profile_update', name: 'Profile Update' },
+];
+
+function FlowMappingsTab({ siteId }: { siteId: number }) {
+  const [mappings, setMappings] = useState<SiteFlowMapping[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [addFlowKey, setAddFlowKey] = useState('');
+  const [addFlowName, setAddFlowName] = useState('');
+  const [addImpl, setAddImpl] = useState('template');
+  const [addError, setAddError] = useState<string | null>(null);
+  const [addSaving, setAddSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const result = await listFlowMappings(siteId);
+    setLoading(false);
+    if (result.success && 'mappings' in result) setMappings(result.mappings);
+    else if (!result.success) setError(result.error);
+  }, [siteId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function handleAdd() {
+    if (!addFlowKey.trim() || !addFlowName.trim()) {
+      setAddError('Flow key and name are required');
+      return;
+    }
+    setAddSaving(true);
+    setAddError(null);
+    const result = await upsertFlowMapping({
+      site_id: siteId,
+      flow_key: addFlowKey.trim(),
+      flow_name: addFlowName.trim(),
+      implementation: addImpl,
+    });
+    setAddSaving(false);
+    if (result.success) {
+      setShowAdd(false);
+      setAddFlowKey(''); setAddFlowName(''); setAddImpl('template');
+      load();
+    } else if (!result.success) {
+      setAddError(result.error);
+    }
+  }
+
+  function pickWellKnown(key: string) {
+    const wk = WELL_KNOWN_FLOWS.find(f => f.key === key);
+    if (wk) { setAddFlowKey(wk.key); setAddFlowName(wk.name); }
+  }
+
+  if (loading) return <div className="flex items-center text-zinc-500 text-sm gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading...</div>;
+  if (error) return <div className="text-red-600 text-sm">{error}</div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h2 className="text-lg font-semibold text-zinc-900">Flow Mappings</h2>
+        <Button size="sm" onClick={() => { setShowAdd(true); setAddError(null); }}>
+          <Plus className="w-4 h-4 mr-1" /> Add flow
+        </Button>
+      </div>
+
+      {showAdd && (
+        <div className="border border-blue-200 rounded-lg p-4 bg-blue-50 space-y-3">
+          <h3 className="text-sm font-semibold text-blue-900">New flow mapping</h3>
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {WELL_KNOWN_FLOWS.map(f => (
+              <button
+                key={f.key}
+                type="button"
+                onClick={() => pickWellKnown(f.key)}
+                className="text-xs px-2 py-1 rounded border border-zinc-300 bg-white hover:bg-zinc-100 transition-colors"
+              >
+                {f.name}
+              </button>
+            ))}
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <Label className="text-xs">Flow key *</Label>
+              <Input className="mt-1 h-8 text-sm font-mono" placeholder="registration" value={addFlowKey} onChange={e => setAddFlowKey(e.target.value)} />
+            </div>
+            <div>
+              <Label className="text-xs">Display name *</Label>
+              <Input className="mt-1 h-8 text-sm" placeholder="Registration" value={addFlowName} onChange={e => setAddFlowName(e.target.value)} />
+            </div>
+            <div>
+              <Label className="text-xs">Implementation</Label>
+              <select
+                className="mt-1 w-full text-sm border border-zinc-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={addImpl}
+                onChange={e => setAddImpl(e.target.value)}
+              >
+                <option value="template">Template</option>
+                <option value="custom">Custom</option>
+                <option value="config_driven">Config driven</option>
+              </select>
+            </div>
+          </div>
+          {addError && <InlineError msg={addError} />}
+          <div className="flex gap-2">
+            <Button size="sm" onClick={handleAdd} disabled={addSaving}>
+              {addSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Save className="w-3.5 h-3.5 mr-1" />} Save
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => { setShowAdd(false); setAddError(null); }}>Cancel</Button>
+          </div>
+        </div>
+      )}
+
+      {mappings.length === 0 ? (
+        <div className="text-center py-10 text-zinc-500 text-sm">
+          No flow mappings configured. Add a flow to define how test automation interacts with this site.
+        </div>
+      ) : (
+        <div className="border border-zinc-200 rounded-lg overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-zinc-50 border-b border-zinc-200">
+              <tr>
+                <th className="px-4 py-2 text-left font-semibold text-zinc-600">Flow key</th>
+                <th className="px-4 py-2 text-left font-semibold text-zinc-600">Name</th>
+                <th className="px-4 py-2 text-left font-semibold text-zinc-600">Implementation</th>
+                <th className="px-4 py-2 text-center font-semibold text-zinc-600">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {mappings.map(m => (
+                <tr key={m.id} className="hover:bg-zinc-50 transition-colors">
+                  <td className="px-4 py-2 font-mono text-xs text-zinc-700">{m.flow_key}</td>
+                  <td className="px-4 py-2 font-medium text-zinc-900">{m.flow_name}</td>
+                  <td className="px-4 py-2">
+                    <span className="inline-block bg-zinc-100 text-zinc-600 text-xs px-2 py-0.5 rounded">{m.implementation}</span>
+                  </td>
+                  <td className="px-4 py-2 text-center"><StatusBadge active={m.is_active} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Selectors tab ───────────────────────────────────────────────────────────
+
+const SELECTOR_TYPES = ['css', 'xpath', 'aria_role', 'visible_text', 'test_id'] as const;
+
+function SelectorsTab({ siteId }: { siteId: number }) {
+  const [entries, setEntries] = useState<SiteSelectorEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [showAdd, setShowAdd] = useState(false);
+  const [addForm, setAddForm] = useState({
+    element_key: '', label: '', selector_type: 'css' as string,
+    selector_value: '', flow_key: '', notes: '',
+  });
+  const [addError, setAddError] = useState<string | null>(null);
+  const [addSaving, setAddSaving] = useState(false);
+  const [filterFlow, setFilterFlow] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const result = await listSelectorEntries(siteId, undefined, filterFlow || undefined);
+    setLoading(false);
+    if (result.success && 'entries' in result) setEntries(result.entries);
+    else if (!result.success) setError(result.error);
+  }, [siteId, filterFlow]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function handleAdd() {
+    if (!addForm.element_key.trim() || !addForm.label.trim() || !addForm.selector_value.trim()) {
+      setAddError('Element key, label, and selector value are required');
+      return;
+    }
+    setAddSaving(true);
+    setAddError(null);
+    const result = await createSelectorEntry({
+      site_id: siteId,
+      element_key: addForm.element_key.trim(),
+      label: addForm.label.trim(),
+      selector_type: addForm.selector_type,
+      selector_value: addForm.selector_value.trim(),
+      flow_key: addForm.flow_key || undefined,
+      notes: addForm.notes || undefined,
+    });
+    setAddSaving(false);
+    if (result.success) {
+      setShowAdd(false);
+      setAddForm({ element_key: '', label: '', selector_type: 'css', selector_value: '', flow_key: '', notes: '' });
+      load();
+    } else if (!result.success) {
+      setAddError(result.error);
+    }
+  }
+
+  // Group entries by element_key
+  const grouped = entries.reduce<Record<string, SiteSelectorEntry[]>>((acc, e) => {
+    (acc[e.element_key] ??= []).push(e);
+    return acc;
+  }, {});
+
+  if (loading) return <div className="flex items-center text-zinc-500 text-sm gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading...</div>;
+  if (error) return <div className="text-red-600 text-sm">{error}</div>;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-between items-center">
+        <h2 className="text-lg font-semibold text-zinc-900">Selector Dictionary</h2>
+        <div className="flex gap-2 items-center">
+          <Input
+            className="h-8 text-sm w-40"
+            placeholder="Filter by flow..."
+            value={filterFlow}
+            onChange={e => setFilterFlow(e.target.value)}
+          />
+          <Button size="sm" onClick={() => { setShowAdd(true); setAddError(null); }}>
+            <Plus className="w-4 h-4 mr-1" /> Add selector
+          </Button>
+        </div>
+      </div>
+
+      {showAdd && (
+        <div className="border border-blue-200 rounded-lg p-4 bg-blue-50 space-y-3">
+          <h3 className="text-sm font-semibold text-blue-900">New selector entry</h3>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <Label className="text-xs">Element key *</Label>
+              <Input className="mt-1 h-8 text-sm font-mono" placeholder="email_input" value={addForm.element_key} onChange={e => setAddForm(f => ({ ...f, element_key: e.target.value }))} />
+            </div>
+            <div>
+              <Label className="text-xs">Label *</Label>
+              <Input className="mt-1 h-8 text-sm" placeholder="Email input field" value={addForm.label} onChange={e => setAddForm(f => ({ ...f, label: e.target.value }))} />
+            </div>
+            <div>
+              <Label className="text-xs">Type</Label>
+              <select
+                className="mt-1 w-full text-sm border border-zinc-300 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                value={addForm.selector_type}
+                onChange={e => setAddForm(f => ({ ...f, selector_type: e.target.value }))}
+              >
+                {SELECTOR_TYPES.map(t => <option key={t} value={t}>{t.replace('_', ' ')}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-2">
+              <Label className="text-xs">Selector value *</Label>
+              <Input className="mt-1 h-8 text-sm font-mono" placeholder="#email, input[name='email'], [data-testid='email']" value={addForm.selector_value} onChange={e => setAddForm(f => ({ ...f, selector_value: e.target.value }))} />
+            </div>
+            <div>
+              <Label className="text-xs">Flow key (optional)</Label>
+              <Input className="mt-1 h-8 text-sm font-mono" placeholder="registration" value={addForm.flow_key} onChange={e => setAddForm(f => ({ ...f, flow_key: e.target.value }))} />
+            </div>
+          </div>
+          <div>
+            <Label className="text-xs">Notes</Label>
+            <Input className="mt-1 h-8 text-sm" value={addForm.notes} onChange={e => setAddForm(f => ({ ...f, notes: e.target.value }))} />
+          </div>
+          {addError && <InlineError msg={addError} />}
+          <div className="flex gap-2">
+            <Button size="sm" onClick={handleAdd} disabled={addSaving}>
+              {addSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Save className="w-3.5 h-3.5 mr-1" />} Save
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => { setShowAdd(false); setAddError(null); }}>Cancel</Button>
+          </div>
+        </div>
+      )}
+
+      {entries.length === 0 ? (
+        <div className="text-center py-10 text-zinc-500 text-sm">
+          No selectors configured. Add selectors so the automation engine knows how to find elements on this site.
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {Object.entries(grouped).map(([elementKey, items]) => (
+            <div key={elementKey} className="border border-zinc-200 rounded-lg overflow-hidden">
+              <div className="bg-zinc-50 px-4 py-2 border-b border-zinc-200 flex items-center gap-2">
+                <MousePointer className="w-3.5 h-3.5 text-zinc-400" />
+                <span className="font-mono text-sm font-semibold text-zinc-700">{elementKey}</span>
+                <span className="text-xs text-zinc-400 ml-1">({items.length} {items.length === 1 ? 'selector' : 'selectors'})</span>
+              </div>
+              <table className="w-full text-sm">
+                <thead className="bg-white border-b border-zinc-100">
+                  <tr>
+                    <th className="px-4 py-1.5 text-left text-xs font-medium text-zinc-500">Label</th>
+                    <th className="px-4 py-1.5 text-left text-xs font-medium text-zinc-500">Type</th>
+                    <th className="px-4 py-1.5 text-left text-xs font-medium text-zinc-500">Selector</th>
+                    <th className="px-4 py-1.5 text-left text-xs font-medium text-zinc-500">Flow</th>
+                    <th className="px-4 py-1.5 text-center text-xs font-medium text-zinc-500">Order</th>
+                    <th className="px-4 py-1.5 text-center text-xs font-medium text-zinc-500">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-50">
+                  {items.map(s => (
+                    <tr key={s.id} className="hover:bg-zinc-50 transition-colors">
+                      <td className="px-4 py-1.5 text-zinc-900">{s.label}</td>
+                      <td className="px-4 py-1.5">
+                        <span className="inline-block bg-zinc-100 text-zinc-600 text-xs px-1.5 py-0.5 rounded font-mono">{s.selector_type}</span>
+                      </td>
+                      <td className="px-4 py-1.5 font-mono text-xs text-zinc-600 max-w-xs truncate">{s.selector_value}</td>
+                      <td className="px-4 py-1.5 font-mono text-xs text-zinc-400">{s.flow_key ?? '-'}</td>
+                      <td className="px-4 py-1.5 text-center text-zinc-500">{s.fallback_order}</td>
+                      <td className="px-4 py-1.5 text-center"><StatusBadge active={s.is_active} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Site detail root ─────────────────────────────────────────────────────────
 
 export default function SiteDetailPage({ params }: { params: Promise<{ siteId: string }> }) {
@@ -686,6 +1132,18 @@ export default function SiteDetailPage({ params }: { params: Promise<{ siteId: s
 
           {activeTab === 'environments' && (
             <EnvironmentsTab siteId={siteId} />
+          )}
+
+          {activeTab === 'capabilities' && (
+            <CapabilitiesTab siteId={siteId} />
+          )}
+
+          {activeTab === 'flows' && (
+            <FlowMappingsTab siteId={siteId} />
+          )}
+
+          {activeTab === 'selectors' && (
+            <SelectorsTab siteId={siteId} />
           )}
 
           {activeTab === 'credentials' && (

@@ -33,3 +33,12 @@ export * from "./report.types";
 
 // Logging utilities
 export * from "./logging";
+
+// Capability types (Phase 14)
+export * from "./capability.types";
+
+// Account lifecycle types (Phase 15)
+export * from "./account.types";
+
+// Email provider types (Phase 16)
+export * from "./email-provider.types";

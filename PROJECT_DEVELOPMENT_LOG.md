@@ -6,6 +6,503 @@ This log captures all major decisions and changes made during development of the
 
 ---
 
+## May 12, 2026 — Phase 17, 19, 20 Implementation
+
+### Summary
+
+Implemented Phases 17 (Authorize.net Payment Automation), 19 (Test Data Management), and 20 (Generic QA Orchestration) of the QA Automation Platform. This work adds payment provider abstraction, comprehensive test data management, and campaign orchestration capabilities to the platform.
+
+### Phase 17: Authorize.net Payment Automation
+
+**Database Migrations:**
+- `0024_payment_provider_tables.sql` - Creates tables for payment providers, payment scenarios, payment transactions, and payment provider bindings
+
+**Stored Procedures (0167-0181, 15 procs):**
+- Payment provider CRUD: `sp_payment_providers_insert`, `sp_payment_providers_list`, `sp_payment_providers_get_by_id`, `sp_payment_providers_update`
+- Payment scenario CRUD: `sp_payment_scenarios_insert`, `sp_payment_scenarios_list`, `sp_payment_scenarios_get_by_id`, `sp_payment_scenarios_update`
+- Payment transaction tracking: `sp_payment_transactions_insert`, `sp_payment_transactions_list`, `sp_payment_transactions_get_by_id`, `sp_payment_transactions_update`
+- Payment provider bindings: `sp_payment_provider_bindings_insert`, `sp_payment_provider_bindings_list`, `sp_payment_provider_bindings_resolve`
+
+**TypeScript Packages:**
+- Created `packages/payment/` with payment provider abstraction layer
+- `src/types.ts` - Payment provider types, transaction types, verification results
+- `src/provider.ts` - Generic payment provider interface with pluggable registry
+- `src/providers/authorize-net-provider.ts` - Authorize.net sandbox implementation with test card simulation
+- `src/verification.ts` - Payment verification across UI, email receipt, provider API, and admin reconciliation with redaction utilities
+
+**Dashboard Server Actions:**
+- `apps/dashboard-web/app/actions/payment-providers.ts` - Payment provider CRUD server actions
+- `apps/dashboard-web/app/actions/payment-scenarios.ts` - Payment scenario CRUD server actions
+- `apps/dashboard-web/app/actions/payment-transactions.ts` - Payment transaction tracking server actions
+- `apps/dashboard-web/app/actions/payment-provider-bindings.ts` - Payment provider binding server actions
+
+### Phase 19: Test Data Management
+
+**Database Migrations:**
+- `0025_test_data_management_tables.sql` - Creates tables for test identities, test data ledger, cleanup jobs, cleanup job details, and data redaction rules
+
+**Stored Procedures (0182-0192, 11 procs):**
+- Test identities: `sp_test_identities_insert`, `sp_test_identities_list`, `sp_test_identities_get_by_id`
+- Test data ledger: `sp_test_data_ledger_insert`, `sp_test_data_ledger_list`, `sp_test_data_ledger_update_cleanup_status`
+- Cleanup jobs: `sp_cleanup_jobs_insert`, `sp_cleanup_jobs_list`, `sp_cleanup_jobs_update_status`
+- Data redaction: `sp_data_redaction_rules_insert`, `sp_data_redaction_rules_list`
+
+**TypeScript Packages:**
+- Created `packages/test-data/` for test data management
+- `src/types.ts` - Test identity, data ledger, cleanup job, and redaction rule types
+- `src/identityGenerator.ts` - Realistic test identity generator with deterministic seeding, names, addresses, phone numbers, DOB
+- `src/collisionAvoidance.ts` - Data collision detection and unique identifier generation with validation
+- `src/cleanupJobs.ts` - Cleanup job management with dry-run support and execution tracking
+- `src/redaction.ts` - Sensitive data redaction with rule-based patterns and default rules for common field types
+
+### Phase 20: Generic QA Orchestration
+
+**Database Migrations:**
+- `0026_orchestration_tables.sql` - Creates tables for QA campaigns, campaign scenarios, campaign schedules, campaign signoffs, and campaign executions
+
+**Stored Procedures (0193-0200, 8 procs):**
+- QA campaigns: `sp_qa_campaigns_insert`, `sp_qa_campaigns_list`, `sp_qa_campaigns_get_by_id`
+- Scenario matrix: `sp_campaign_scenarios_generate_matrix` (materializes cross-product of all dimension combinations), `sp_campaign_scenarios_list`
+- Scheduling: `sp_campaign_schedules_insert`
+- Executions: `sp_campaign_executions_insert`, `sp_campaign_executions_update_status`
+
+**TypeScript Packages:**
+- Created `packages/orchestration/` for campaign orchestration
+- `src/types.ts` - Campaign, scenario, schedule, execution, and signoff types
+- `src/campaignManager.ts` - Campaign CRUD, scenario matrix generation, and scenario listing
+- `src/executionManager.ts` - Campaign execution lifecycle management (create, start, complete, fail)
+
+### Architectural Decisions
+
+**Phase 17:**
+- Generic payment provider interface allows future addition of Stripe, PayPal without code changes
+- Authorize.net sandbox implementation simulates API responses for test cards (success/decline scenarios)
+- Payment verification combines UI confirmation, email receipt, provider API status, and optional admin reconciliation
+- All sensitive payment data (card numbers, CVV) redacted in logs and reports
+- Payment profiles already existed from Phase 1, extended with provider bindings for site/environment mapping
+
+**Phase 19:**
+- Identity generator uses deterministic seeding for reproducible test data
+- Collision avoidance checks both test_identities and test_data_ledger for uniqueness
+- Cleanup jobs support dry-run mode for previewing deletions before execution
+- Redaction rules are table-specific with priority ordering, includes sensible defaults
+- Test data ledger tracks all generated data with cleanup status and expiration dates
+
+**Phase 20:**
+- Campaign scenario matrix materializes cross-product of all dimension combinations (persona × device × network × browser × payment scenario × email provider × flow type)
+- Scenario hashing prevents duplicate combinations
+- Concurrency caps limit parallel execution to prevent resource exhaustion
+- Campaign executions track detailed metrics (total, executed, successful, failed, skipped)
+- Approval gates integrated via existing approval_policies table
+
+### Files Created
+
+**Database Migrations (3):**
+- `db/migrations/0024_payment_provider_tables.sql`
+- `db/migrations/0025_test_data_management_tables.sql`
+- `db/migrations/0026_orchestration_tables.sql`
+
+**Stored Procedures (34):**
+- Phase 17: 0167-0181 (15 procs)
+- Phase 19: 0182-0192 (11 procs)
+- Phase 20: 0193-0200 (8 procs)
+
+**TypeScript Packages (3):**
+- `packages/payment/` - Payment provider abstraction (6 files)
+- `packages/test-data/` - Test data management (6 files)
+- `packages/orchestration/` - Campaign orchestration (4 files)
+
+**Dashboard Server Actions (4):**
+- `apps/dashboard-web/app/actions/payment-providers.ts`
+- `apps/dashboard-web/app/actions/payment-scenarios.ts`
+- `apps/dashboard-web/app/actions/payment-transactions.ts`
+- `apps/dashboard-web/app/actions/payment-provider-bindings.ts`
+
+### Dependencies
+
+**Phase 17 Dependencies:**
+- Requires Phase 14 (site model) for payment field mappings
+- Requires Phase 15 (account lifecycle) for payment flows
+- Requires Phase 16 (email provider) for payment receipt validation
+- Requires Phase 1 vault integration for payment credential storage
+
+**Phase 19 Dependencies:**
+- Requires Phase 14 (site model) for custom field mappings
+- Requires Phase 15 (account lifecycle) for test account tracking
+- Requires Phase 17 (payment) for payment data cleanup
+- Requires Phase 16 (email) for email data cleanup
+
+**Phase 20 Dependencies:**
+- Requires Phase 14 (site model) for campaign site targeting
+- Requires Phase 15 (account lifecycle) for flow selection
+- Requires Phase 17 (payment) for payment scenario matrix
+- Requires Phase 16 (email) for email provider matrix
+- Requires Phase 19 (test data) for test data management
+- Requires Phase 1 (approvals) for approval gate integration
+
+### Pending Work
+
+- Phase 17 runner integration (Playwright payment automation flows)
+- Phase 20 dashboard UI for campaign management
+- Phase 20 scheduling logic implementation (cron parsing, webhook handling)
+- Phase 20 QA sign-off workflow implementation
+- Database migrations need to be applied to production database
+- Stored procedures need to be deployed to production database
+
+### Issues / Lessons
+
+- Scenario matrix generation uses nested loops which may be slow for large dimension arrays - consider optimizing with CROSS JOIN LATERAL in future
+- Cleanup job execution is stubbed for artifacts and payment data - needs implementation based on specific cleanup requirements
+- Payment provider sandbox simulation uses basic success/decline logic - could be enhanced with more sophisticated test card handling
+- No integration tests written for new packages - should be added before production deployment
+
+---
+
+## May 12, 2026 — 00:45 EDT — Stored Procedures 0129-0143 Applied to Database
+
+### Summary
+
+Applied 15 stored procedures (Phase 16 — Email Provider Layer) to the `qa_platform` PostgreSQL database running in Docker container `qa-platform-postgres` (port 5434). All 15 functions created/replaced successfully with zero errors. Verified via `information_schema.routines` query confirming all 15 rows present.
+
+### Connection Details
+
+- **Container**: `qa-platform-postgres` (Docker, healthy, Up 28h)
+- **Host port**: `localhost:5434` → container port `5432`
+- **Database**: `qa_platform`, **User**: `qa_user`
+- **Method**: `psql` with `ON_ERROR_STOP=1` per function, then confirmed via `information_schema.routines`
+
+> **Note**: The `qa_platform_pg` MCP server connects on port 5432 (inside Docker network). Direct `psql` on port 5434 was used for deployment — equivalent connection to the same database.
+
+### Stored Procedures Applied
+
+| # | Function Name | Purpose | Status |
+|---|---|---|---|
+| 0129 | `sp_email_providers_insert` | Insert/upsert email provider config (ON CONFLICT name) | ✓ Created |
+| 0130 | `sp_email_providers_list` | List all providers, optional active-only filter | ✓ Created |
+| 0131 | `sp_email_providers_get_by_id` | Retrieve single provider by PK | ✓ Created |
+| 0132 | `sp_email_providers_update` | Partial update (COALESCE-based, non-NULL params only) | ✓ Created |
+| 0133 | `sp_email_inbox_bindings_v2_insert` | Insert new inbox binding (provider → site/env/persona/flow) | ✓ Created |
+| 0134 | `sp_email_inbox_bindings_v2_list` | List bindings with provider join, optional dimension filters | ✓ Created |
+| 0135 | `sp_email_inbox_bindings_v2_resolve` | Best-match binding via specificity scoring + priority tiebreak | ✓ Created |
+| 0136 | `sp_email_template_assertions_insert` | Insert/upsert assertion rule (ON CONFLICT site+type+name) | ✓ Created |
+| 0137 | `sp_email_template_assertions_list` | List assertions for a site, optional email_type filter | ✓ Created |
+| 0138 | `sp_email_timing_slas_insert` | Insert/upsert SLA definition (ON CONFLICT site+email_type) | ✓ Created |
+| 0139 | `sp_email_timing_slas_list` | List all SLA definitions for a site | ✓ Created |
+| 0140 | `sp_email_timing_results_insert` | Record email delivery timing result for a run execution | ✓ Created |
+| 0141 | `sp_email_timing_results_list` | List timing results with LEFT JOIN to SLA thresholds | ✓ Created |
+| 0142 | `sp_email_correlation_configs_insert` | Insert/upsert correlation config (ON CONFLICT site+provider) | ✓ Created |
+| 0143 | `sp_email_correlation_configs_get` | Get active correlation config for site, optional provider scope | ✓ Created |
+
+### Decisions
+
+- No `BEGIN;`/`COMMIT;` wrappers were present in any file — each file contained exactly one `CREATE OR REPLACE FUNCTION` statement, executed directly.
+- `ON_ERROR_STOP=1` used to catch and surface any parse or dependency errors immediately.
+- Dependency on migration `0023_email_provider_tables.sql` (tables: `email_providers`, `email_inbox_bindings_v2`, `email_template_assertions`, `email_timing_slas`, `email_timing_results`, `email_correlation_configs`) confirmed already applied.
+
+### Issues / Lessons
+
+- **MCP port mismatch**: The `qa_platform_pg` MCP server config specifies port 5432 (internal Docker network), but from the host the container is reachable on port 5434. Used `psql -p 5434` directly for deployment. MCP server works correctly within the Docker network when called from Windsurf.
+- No errors or conflicts encountered. All 15 functions were new (first application of these procs).
+
+---
+
+## May 12, 2026 — Phases 14/15/16: Generic Site Model, Account Lifecycle, Email Provider Layer
+
+### Summary
+
+Completed core implementation of Phases 14, 15, and 16 — pivoting the platform from Yugal Kunj-specific to a generic registration-site QA automation product. This session covered: DB migrations, 38 stored procedures, shared TypeScript types, rules schema extensions, email provider abstraction, account lifecycle flows (Playwright), dashboard server actions, and dashboard UI (capabilities/flows/selectors tabs).
+
+### Database Migrations Applied
+
+| Migration | Phase | Tables Created |
+|---|---|---|
+| `0021_site_capabilities_tables.sql` | 14 | `site_capabilities`, `site_flow_mappings`, `site_selector_entries`, `site_rules_versions` |
+| `0022_account_lifecycle_tables.sql` | 15 | `test_accounts`, `test_account_actions` |
+| `0023_email_provider_tables.sql` | 16 | `email_providers`, `email_inbox_bindings_v2`, `email_template_assertions`, `email_timing_slas`, `email_timing_results`, `email_correlation_configs` |
+
+### Stored Procedures Created and Applied (38 total)
+
+| Range | Phase | Group | Count |
+|---|---|---|---|
+| 0129-0143 | 16 | Email providers, inbox bindings v2, template assertions, timing SLAs/results, correlation configs | 15 |
+| 0144-0156 | 14 | Site capabilities CRUD + batch upsert, flow mappings CRUD, selector entries CRUD, rules versions (insert with auto-versioning, list, get_active) | 13 |
+| 0157-0166 | 15 | Test accounts CRUD + request/approve/mark cleanup, account actions CRUD | 10 |
+
+### TypeScript Files Written
+
+| File | Phase | Purpose |
+|---|---|---|
+| `packages/shared-types/src/capability.types.ts` | 14 | SiteCapability, SiteFlowMapping, SiteFlowKey enum, SelectorEntry, SiteRulesVersion |
+| `packages/shared-types/src/account.types.ts` | 15 | TestAccount, TestAccountAction, LoginStrategy enum, AccountStatus enum |
+| `packages/shared-types/src/email-provider.types.ts` | 16 | EmailProvider, EmailInboxBindingV2, EmailTemplateAssertion, EmailTimingSla, EmailTimingResult, EmailCorrelationConfig |
+| `packages/shared-types/src/index.ts` | All | Updated barrel exports for new type modules |
+| `packages/rules/src/schema.ts` | 14 | Extended with SiteCapabilitiesSchema, LoginStrategySchema, CleanupPolicySchema, EmailExpectationsSchema, SelectorEntrySchema v2 |
+| `packages/email/src/provider.ts` | 16 | EmailProvider interface (connect, disconnect, fetchByToken, fetchBySubject, fetchLatest, deleteMessage) |
+| `packages/email/src/providers/imap-provider.ts` | 16 | IMAP implementation of EmailProvider interface |
+| `packages/email/src/providers/test-provider.ts` | 16 | In-memory test provider for unit testing |
+| `packages/email/src/providers/index.ts` | 16 | Provider barrel exports |
+| `packages/email/src/templateAssertions.ts` | 16 | Assertions for registration, verification, password reset, receipt, notification emails |
+| `packages/email/src/correlationStrategy.ts` | 16 | Plus-addressing, generated inbox, unique subject token strategies |
+| `packages/email/src/index.ts` | 16 | Updated with all new exports |
+| `packages/playwright-core/src/lifecycle/registration-template.ts` | 15.1 | Persona-aware registration form fill-and-submit |
+| `packages/playwright-core/src/lifecycle/login-strategy.ts` | 15.2 | Pluggable login strategies (EmailPassword, MagicLink, OTP, SSO) |
+| `packages/playwright-core/src/lifecycle/email-verification.ts` | 15.3 | Email verification via link-click or code-entry |
+| `packages/playwright-core/src/lifecycle/password-reset.ts` | 15.4 | Two-phase password reset flow |
+| `packages/playwright-core/src/lifecycle/index.ts` | 15 | Barrel export for lifecycle modules |
+
+### Dashboard Files Written
+
+| File | Phase | Purpose |
+|---|---|---|
+| `apps/dashboard-web/app/actions/capabilities.ts` | 14 | Server actions: listCapabilities, upsertCapability, batchUpsertCapabilities, listFlowMappings, upsertFlowMapping, listSelectorEntries, createSelectorEntry, updateSelectorEntry, listRulesVersions, createRulesVersion, getActiveRulesVersion |
+| `apps/dashboard-web/app/actions/test-accounts.ts` | 15 | Server actions: listTestAccounts, getTestAccount, createTestAccount, updateTestAccountStatus, requestCleanup, approveCleanup, markCleaned, createAccountAction, listAccountActions |
+| `apps/dashboard-web/app/actions/email-providers.ts` | 16 | Server actions: CRUD for email providers, inbox bindings v2, template assertions, timing SLAs/results, correlation configs (15 functions) |
+| `apps/dashboard-web/app/dashboard/sites/[siteId]/page.tsx` | 14 | Added 3 new tabs (Capabilities, Flows, Selectors) with full CRUD UI to site detail page |
+
+### Architectural Decisions
+
+- **Proc numbering**: Parallel subagents caused numbering collisions at 0127-0141. Resolved by renumbering into sequential blocks: 0129-0143 (email), 0144-0156 (capabilities), 0157-0166 (accounts).
+- **Inbox binding v2 specificity scoring**: `sp_email_inbox_bindings_v2_resolve` scores matches by counting non-NULL dimension columns plus priority as tiebreaker. Enables layered defaults (site-wide -> site+env -> site+env+persona) without complex deletion logic.
+- **Login strategy pattern**: Each login type is an independent class implementing `LoginStrategy`. A Map-based registry allows `getLoginStrategy(type)` lookup at runtime.
+- **No DB access in lifecycle layer**: Playwright lifecycle modules are pure browser orchestration. DB persistence is handled by the caller, keeping concerns separated.
+- **Well-known capability/flow presets**: Dashboard UI provides a curated list of well-known capabilities and flows (registration, login, email_verification, etc.) while still allowing custom values.
+- **Batch upsert for capabilities**: `batchUpsertCapabilities` enables toggling all capabilities in one operation during onboarding, reducing round-trips.
+
+### Numbering Note (Corrected)
+
+The prior log entries referencing procs 0127-0141 and 0142-0151 contain **stale numbering** from before the collision fix. The canonical numbering is: email procs 0129-0143, site capability procs 0144-0156, test account procs 0157-0166.
+
+### Lessons Learned
+
+- **Always check directory for highest-numbered file before assigning proc numbers**, especially when using parallel subagents.
+- **Batch MCP execution**: For bulk proc deployment, executing procs via `docker exec psql` is more reliable than individual MCP `execute` calls when dealing with complex function bodies.
+- **Tab overflow**: When adding tabs to an existing tab bar, add `overflow-x-auto` to prevent layout breakage on narrow viewports.
+
+---
+
+## May 12, 2026 — Database Credential Runtime Prompting
+
+### Summary
+
+Implemented runtime credential prompting for database connection parameters (POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB, POSTGRES_HOST, POSTGRES_PORT). This is a project-wide guidance: database credentials must be prompted at runtime for each environment (development, staging, production) rather than being hardcoded in configuration files.
+
+### Files Modified
+
+| File | Changes |
+|---|---|
+| `docker-compose.yml` | Replaced hardcoded database credentials with environment variable substitution (${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}) for postgres, migrator, dashboard-web, and backup services |
+| `.env.example` | Added documentation explaining the interactive credential setup script and requirement for POSTGRES_PASSWORD |
+
+### Files Written
+
+| File | Purpose |
+|---|---|
+| `scripts/setup-db-credentials.ts` | Interactive TypeScript script that prompts for database credentials per environment and saves to appropriate .env file (.env, .env.staging, .env.production) |
+
+### Architectural Decisions
+
+- **Runtime prompting over hardcoded credentials**: Database credentials are no longer hardcoded in docker-compose.yml. Instead, environment variable substitution requires POSTGRES_PASSWORD to be set before docker-compose can start services.
+- **Interactive setup script**: Created `scripts/setup-db-credentials.ts` which prompts developers for credentials interactively. Password input is hidden (asterisks shown). Existing values are displayed in brackets for easy acceptance.
+- **Environment-specific .env files**: Credentials are saved to environment-specific files (.env, .env.staging, .env.production) which are gitignored. This allows different credentials per environment without committing secrets to git.
+- **No chicken-and-egg problem**: Unlike the vault system (which requires DB connection first to unlock), this approach works for database credentials since they're needed before the app can even connect to the database.
+- **Required POSTGRES_PASSWORD**: Using `${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}` syntax in docker-compose.yml ensures the service fails fast if the password is not set, preventing accidental deployments with missing credentials.
+
+### Usage
+
+Run `tsx scripts/setup-db-credentials.ts [environment]` before starting the application:
+- environment: development | staging | production (default: development)
+- Script prompts for all database credentials interactively
+- Press Enter to accept existing values shown in brackets
+- Credentials saved to appropriate .env file
+
+### Rationale
+
+- Prevents hardcoded credentials in git repository
+- Allows different credentials per environment without complex secret management
+- Interactive prompting ensures developer awareness of credential configuration
+- Simple, no external dependencies, works with Docker Compose
+
+---
+
+## May 12, 2026 — Phase 15: Generic Account Lifecycle Automation (TypeScript)
+
+### Summary
+
+Wrote 5 TypeScript source files implementing the Phase 15 Generic Account Lifecycle Automation layer under `packages/playwright-core/src/lifecycle/`. These modules provide reusable, site-agnostic Playwright flows for registration, login, email verification, and password reset. They consume site-specific field mappings and selectors from the Phase 14 generic site capability model and require no changes to add new site support.
+
+### Files Written
+
+| File | Phase | Purpose |
+|---|---|---|
+| `packages/playwright-core/src/lifecycle/registration-template.ts` | 15.1 | Reusable registration form fill-and-submit using site field mapping + persona identity data |
+| `packages/playwright-core/src/lifecycle/login-strategy.ts` | 15.2 | Pluggable login strategy framework — `EmailPasswordStrategy`, `UsernamePasswordStrategy`, `MagicLinkStrategy`, `EmailOtpStrategy`, `ManualSsoApprovalStrategy` + strategy registry |
+| `packages/playwright-core/src/lifecycle/email-verification.ts` | 15.3 | Email verification via link-click or code-entry; utility functions `extractVerificationCode` and `extractVerificationLink` |
+| `packages/playwright-core/src/lifecycle/password-reset.ts` | 15.4 | Two-phase password reset: `requestPasswordReset` (trigger + email submit) and `completePasswordReset` (navigate reset link, set new password); `extractResetLink` utility |
+| `packages/playwright-core/src/lifecycle/index.ts` | 15 | Barrel export for all lifecycle modules with `.js` ESM extensions |
+
+### Architectural Decisions
+
+- **Pluggable strategy pattern for login**: Each login type is an independent class implementing `LoginStrategy`. A `Map`-based registry allows `getLoginStrategy(type)` lookup at runtime. New strategies can be added without modifying existing code.
+- **ESM `.js` extensions in all imports**: Per project convention; TypeScript compiles to ESM and Node requires explicit extensions.
+- **`hesitateMs` parameter**: All interactive flows accept a `hesitateMs` option (default 200ms) to simulate human-paced input — consistent with the existing `typing.ts` approach in this package.
+- **`override` keyword on `UsernamePasswordStrategy.type`**: Required by TypeScript strict mode when a subclass overrides a `readonly` property declared as a literal type.
+- **No DB access in lifecycle layer**: These modules are pure Playwright orchestration. DB access (recording results, account lifecycle state) is handled by the caller via `invokeProc`/`invokeProcWrite` from `@qa-platform/db`, keeping concerns separated.
+- **Utility extraction functions are pure functions**: `extractVerificationCode`, `extractVerificationLink`, and `extractResetLink` are stateless regex utilities that can be unit-tested without a browser.
+
+### Conventions Applied
+
+- ESM modules with `.js` extensions in import paths
+- TypeScript strict mode — no implicit `any`, explicit return types on all exported functions
+- `camelCase` for variables/functions, `PascalCase` for interfaces/classes/types
+- `options` parameter always defaults to `{}` with nullish coalescing on individual fields (never mutates the caller's object)
+
+---
+
+## May 13, 2026 — Email Provider & Inbox Infrastructure Stored Procedures (0127–0141)
+
+### Summary
+
+Added 15 stored procedures covering the full email provider configuration stack: provider CRUD, inbox binding resolution, template assertions, delivery SLA definitions, timing results recording, and correlation config management. These form the data layer for the email-testing subsystem that validates delivery timing, template content assertions, and inbox routing.
+
+### Files Written
+
+| File | Procedure | Purpose |
+|---|---|---|
+| `0127_sp_email_providers_insert.sql` | `sp_email_providers_insert` | Upsert an email provider (ON CONFLICT on name); returns id, name, provider_type |
+| `0128_sp_email_providers_list.sql` | `sp_email_providers_list` | List all providers; i_active_only flag filters to is_active = TRUE |
+| `0129_sp_email_providers_get_by_id.sql` | `sp_email_providers_get_by_id` | Full detail fetch for a single provider by id |
+| `0130_sp_email_providers_update.sql` | `sp_email_providers_update` | Partial update via COALESCE; returns updated name and provider_type |
+| `0131_sp_email_inbox_bindings_v2_insert.sql` | `sp_email_inbox_bindings_v2_insert` | Insert a new inbox binding (provider → site/env/persona/flow context) |
+| `0132_sp_email_inbox_bindings_v2_list.sql` | `sp_email_inbox_bindings_v2_list` | List active bindings with optional site/env/persona/flow filters; joins provider name/type |
+| `0133_sp_email_inbox_bindings_v2_resolve.sql` | `sp_email_inbox_bindings_v2_resolve` | Best-match resolution: scores specificity by non-NULL dimension count + priority; returns LIMIT 1 |
+| `0134_sp_email_template_assertions_insert.sql` | `sp_email_template_assertions_insert` | Upsert assertion rule (ON CONFLICT on site_id, email_type, assertion_name) |
+| `0135_sp_email_template_assertions_list.sql` | `sp_email_template_assertions_list` | List assertion rules for a site, optionally filtered by email_type |
+| `0136_sp_email_timing_slas_insert.sql` | `sp_email_timing_slas_insert` | Upsert SLA thresholds (ON CONFLICT on site_id, email_type); max and warn ms |
+| `0137_sp_email_timing_slas_list.sql` | `sp_email_timing_slas_list` | List all SLA definitions for a site ordered by email_type |
+| `0138_sp_email_timing_results_insert.sql` | `sp_email_timing_results_insert` | Insert a timing result row for a run execution; captures latency, sla_status, timeout flag |
+| `0139_sp_email_timing_results_list.sql` | `sp_email_timing_results_list` | List timing results for a run execution joined with SLA thresholds (LEFT JOIN) |
+| `0140_sp_email_correlation_configs_insert.sql` | `sp_email_correlation_configs_insert` | Upsert correlation config (ON CONFLICT on site_id, email_provider_id); strategy, base_address, token_pattern |
+| `0141_sp_email_correlation_configs_get.sql` | `sp_email_correlation_configs_get` | Get active correlation config for a site; optional provider filter; returns newest (DESC limit 1) |
+
+### Numbering Note
+
+Numbers 0127–0141 overlap with existing files in the directory that cover report/artifact/site-capabilities procs from prior sessions. These new email-provider files coexist at the same number range with distinct procedure names and table targets. No existing files were modified or deleted.
+
+### Conventions Applied
+
+- `CREATE OR REPLACE FUNCTION` — no migration wrapper (function definitions only)
+- `LANGUAGE plpgsql` with `RETURNS TABLE(...)` for all multi-row results
+- `i_` prefix for all input parameters, `o_` prefix for all return columns
+- COALESCE pattern on nullable update fields to allow partial updates without overwriting existing data
+- Upsert procedures use `ON CONFLICT ... DO UPDATE` with `RETURNING id INTO v_id` to capture the affected row id for both insert and update paths
+- `sp_email_inbox_bindings_v2_resolve` uses an inline specificity score (sum of CASE WHEN IS NOT NULL) as the primary ORDER BY key, with `priority` as tiebreaker — enables flexible "most specific wins" routing without a separate scoring table
+
+### Architectural Decisions
+
+- **Inbox binding v2 design**: Bindings are not unique-constrained on the dimension columns (site/env/persona/flow/role_tag). Multiple bindings can exist for the same context; the resolve proc picks the best one at query time via specificity scoring. This allows layered defaults (site-wide → site+env → site+env+persona) without complex deletion logic.
+- **Correlation config**: Unique on `(site_id, email_provider_id)`. A site can have one config per provider. The get proc returns only is_active = TRUE rows so inactive configs are retained for audit but not served.
+- **SLA and assertion tables**: Both use `(site_id, email_type[, assertion_name])` as the natural unique key for upsert, keeping seeding scripts idempotent.
+
+---
+
+## May 12, 2026 — Test Account Management Stored Procedures (0142–0151)
+
+### Summary
+
+Added 10 stored procedures covering the full lifecycle of test accounts and their associated actions. These support the planned test account management feature — creating, tracking, and cleaning up user accounts registered by the runner during automated flows.
+
+### Files Written
+
+| File | Procedure | Purpose |
+|---|---|---|
+| `0142_sp_test_accounts_insert.sql` | `sp_test_accounts_insert` | Insert a new test account; returns id, email, initial status |
+| `0143_sp_test_accounts_update_status.sql` | `sp_test_accounts_update_status` | Update account status (registered, verified, active, suspended, cleaned_up); COALESCE-safe |
+| `0144_sp_test_accounts_list.sql` | `sp_test_accounts_list` | List accounts for a site with optional cleanup_status / account_status filters; paginated |
+| `0145_sp_test_accounts_get_by_id.sql` | `sp_test_accounts_get_by_id` | Full detail fetch for a single account by id |
+| `0146_sp_test_accounts_request_cleanup.sql` | `sp_test_accounts_request_cleanup` | Set cleanup_status → `pending_approval`; guarded by WHERE cleanup_status = 'active' |
+| `0147_sp_test_accounts_approve_cleanup.sql` | `sp_test_accounts_approve_cleanup` | Set cleanup_status → `approved`; records approver and timestamp; guarded by pending_approval state |
+| `0148_sp_test_accounts_mark_cleaned.sql` | `sp_test_accounts_mark_cleaned` | Set cleanup_status → `cleaned_up` + records cleaned_up_at; accepts approved or active state |
+| `0149_sp_test_account_actions_insert.sql` | `sp_test_account_actions_insert` | Insert a lifecycle action record (register, verify, suspend, cleanup, etc.) for a test account |
+| `0150_sp_test_account_actions_list.sql` | `sp_test_account_actions_list` | List all actions for a test account in ascending chronological order |
+| `0151_sp_test_account_actions_update.sql` | `sp_test_account_actions_update` | Update action status, duration, error, and details; COALESCE-safe for optional fields |
+
+### Numbering Decision
+
+Numbers 0117–0141 were already occupied by report, artifact, site-capabilities, site-selector, and site-rules-versions procs added in prior sessions. These procedures were assigned the next clean block: **0142–0151**.
+
+### Conventions Applied
+
+- `CREATE OR REPLACE FUNCTION` — no migration wrapper (function definitions only)
+- `LANGUAGE plpgsql` with `RETURNS TABLE(...)` for all multi-row results
+- `i_` prefix for all input parameters, `o_` prefix for all return columns
+- State-guarded UPDATEs (request_cleanup, approve_cleanup, mark_cleaned) use `WHERE ... AND status IN (...)` to prevent invalid state transitions
+- COALESCE pattern on nullable update fields to allow partial updates without overwriting existing data
+
+### Lessons Learned
+
+- **Always check the full directory for the highest numbered file before assigning sequence numbers.** The directory had grown significantly since the last known sequence number; checking only a cached value caused three renaming iterations. Going forward: run `ls | grep "^[0-9]" | sort | tail -1` before creating any new proc files.
+
+---
+
+## May 11, 2026 — Phase 12/13 Database Sync & Bug Fixes
+
+### Summary
+
+Code review of Phase 12/13 revealed that 7 database migrations (0014-0020) and 32 stored procedures were missing from the live PostgreSQL database. All were applied successfully, bringing the live DB in sync with the codebase. Additionally, 6 code bugs were fixed across template files and the DR runbook.
+
+### Database Migrations Applied
+
+| Migration | Description |
+|---|---|
+| 0014 | `email_validation_runs` and `email_validation_checks` tables |
+| 0015 | Unique constraint on `run_steps(run_execution_id, step_name)` |
+| 0016 | `api_test_suites` and `api_test_assertions` tables |
+| 0017 | `admin_test_suites` and `admin_test_assertions` tables |
+| 0018 | `llm_analysis_results` and `llm_benchmark_results` tables |
+| 0019 | `artifact_retention_config` table with 7 seed rows |
+| 0020 | 14 composite/partial performance indexes |
+
+### Stored Procedures Applied (32 total, DB went from 91 to 123 functions)
+
+| Group | Procs | Files |
+|---|---|---|
+| Approvals (runner) | `sp_approvals_get_by_id_for_runner` | 0088 |
+| Email validation | 5 procs (insert, update, checks_insert, get_by_execution, checks_list) | 0089-0093 |
+| Token validation | `sp_run_executions_validate_token` | 0096 |
+| API test suites | 6 procs (insert, update, assertions_insert, assertions_batch, list_by_execution, assertions_list_by_suite) | 0097-0102 |
+| Admin test suites | 7 procs (insert, update, assertions_insert, assertions_batch, list_by_execution, assertions_list_by_suite, results_record) | 0103-0109 |
+| LLM analysis | 7 procs (upsert, list_by_execution, get_by_id, benchmark_insert, benchmark_list_latest, benchmark_list_runs, list_failed_executions) | 0110-0116 |
+| Artifact retention | 5 procs (list_expired, mark_deleted, retention_audit, insert, config_list) | 0123-0127 |
+
+### Code Bug Fixes
+
+| File | Bug | Fix |
+|---|---|---|
+| `docs/runbooks/disaster-recovery.md` (line 270) | Referenced non-existent `test_runs` table | Changed to `runs` |
+| `docs/runbooks/disaster-recovery.md` (line 283) | SQL query used `test_runs` table | Changed to `runs` |
+| `docs/runbooks/disaster-recovery.md` (line 484) | Recovery UPDATE targeted `test_runs.error_message` | Changed to `runs.notes` (correct column) |
+| `sites/_template/flows/checkout.ts` (lines 204, 208) | CVV selector missing `input[placeholder*="CVC"]` variant | Added CVC variant alongside CVV |
+| `sites/_template/flows/checkout.ts` (lines 229, 233) | ZIP selector missing `input[placeholder*="Postal"]` variant | Added Postal variant alongside ZIP |
+| `sites/_template/flows/registration.ts` (lines 199, 203) | DOB selector missing `input[placeholder*="birth"]` variant | Added birth variant |
+| `sites/_template/rules.ts` (line 44) | `base_url` used `https://YOUR_SITE_URL` instead of `REPLACE_ME` pattern | Changed to `https://REPLACE_ME` for consistency |
+| `sites/_template/flows/browse.ts` (line 39) | `goto()` used `YOUR_SITE_URL/LISTING_PATH` pattern | Changed to `REPLACE_ME/REPLACE_ME_PATH` for consistency |
+| `sites/_template/flows/registration.ts` (line 53) | `goto()` used `YOUR_SITE_URL/LISTING_PATH` pattern | Changed to `REPLACE_ME/REPLACE_ME_PATH` for consistency |
+
+### Key Decisions
+
+- **Migration 0015 workaround**: Used `DO $$ BEGIN ... EXCEPTION WHEN ... END $$` pattern because PostgreSQL `ALTER TABLE ADD CONSTRAINT` does not support `IF NOT EXISTS` syntax.
+- **Migration 0018 Pascal_Case**: The SQL uses unquoted Pascal_Case column names (`Run_Execution_Id`, etc.) which PostgreSQL folds to lowercase. This means `run_execution_id` references in migration 0020 indexes work correctly.
+- **DR runbook column fix**: Changed `error_message` to `notes` in the recovery SQL because the `runs` table does not have an `error_message` column; `run_executions` does, but `runs` uses `notes` for free-text annotations.
+- **Template placeholder consistency**: Standardized all placeholder URLs to use `REPLACE_ME` pattern (was inconsistent mix of `YOUR_SITE_URL` and `REPLACE_ME`). Left `YOUR_SITE_URL` in comments/documentation context where it serves as an instructional example.
+
+### Lessons Learned
+
+- Always verify that database migrations have been applied to the live database after code review, not just that the migration files exist.
+- PostgreSQL unquoted identifiers fold to lowercase regardless of the case used in DDL, which can mask case-mismatch bugs.
+- Template files should use a single consistent placeholder pattern across all files to make search-and-replace reliable during site onboarding.
+
+---
+
 ## May 11, 2026 — Phase 13 Complete: Expansion Readiness
 
 ### Phase 13 Summary
@@ -4991,6 +5488,57 @@ The comment read: `# pg_restore exits non-zero; the pipe masks the exit code —
 - **GitHub Actions `upload-sarif` `sarif_file` takes a path, not a list**: Unlike `actions/upload-artifact` which accepts `path:` as a glob/multi-line list, `upload-sarif` resolves `sarif_file` as a single filesystem path. Mixing up these conventions is easy when authoring from memory.
 - **Docker Compose base-file hardcoded dev credentials require staging overrides for every service that uses them**: When the base compose file has hardcoded dev values (not `${VAR}`), every new service added to the base must also get an entry in the staging override. A safer pattern for production-targeted services is to use `${VAR:?...}` in the base file from the start, which forces explicit provision in all environments.
 - **launchd plist `WorkingDirectory` paths are machine-specific**: plist files committed to the repo must use a placeholder — never a developer's home directory path — because they will be installed on different machines.
+
+---
+
+## May 12, 2026 — Phase 14: Site Capabilities, Flow Mappings, Selector Entries, Rules Versions Stored Procedures (0129–0141)
+
+### Summary
+
+Wrote 13 new stored procedure files covering four new entity groups: `site_capabilities`, `site_flow_mappings`, `site_selector_entries`, and `site_rules_versions`. These procs support the site onboarding wizard, flow configuration, CSS/XPath selector management, and versioned rules publishing workflows. All files follow the established codebase conventions (compact header comment block, `i_`/`o_` parameter prefixes, `RETURNS TABLE(...)`, `LANGUAGE plpgsql`, no outer `BEGIN`/`END` migration wrapper).
+
+**Note**: The directory already contained files numbered 0104–0128 (written in prior sessions), so new numbering starts at 0129 rather than 0104 as originally requested.
+
+### Files Written
+
+| File | Procedure | Purpose |
+|---|---|---|
+| `0129_sp_site_capabilities_insert.sql` | `sp_site_capabilities_insert` | Upsert on `(site_id, capability_key)` — insert or update capability row |
+| `0130_sp_site_capabilities_list.sql` | `sp_site_capabilities_list` | List all capabilities for a site ordered by `capability_key` |
+| `0131_sp_site_capabilities_update.sql` | `sp_site_capabilities_update` | Update `is_enabled`, `config_json`, `notes` by `id` |
+| `0132_sp_site_capabilities_batch_upsert.sql` | `sp_site_capabilities_batch_upsert` | Parallel-array batch upsert for onboarding wizard; returns upserted count |
+| `0133_sp_site_flow_mappings_insert.sql` | `sp_site_flow_mappings_insert` | Upsert on `(site_id, flow_key)` — insert or update flow mapping |
+| `0134_sp_site_flow_mappings_list.sql` | `sp_site_flow_mappings_list` | List flow mappings; optional `i_active_only` filter |
+| `0135_sp_site_flow_mappings_update.sql` | `sp_site_flow_mappings_update` | Partial update by `id`; NULL parameters leave columns unchanged |
+| `0136_sp_site_selector_entries_insert.sql` | `sp_site_selector_entries_insert` | Insert new selector entry (no upsert — multiple selectors per element_key allowed) |
+| `0137_sp_site_selector_entries_list.sql` | `sp_site_selector_entries_list` | List selectors filtered by `site_id`, optional `element_key`, optional `flow_key` |
+| `0138_sp_site_selector_entries_update.sql` | `sp_site_selector_entries_update` | Partial update by `id`; NULL parameters leave columns unchanged |
+| `0139_sp_site_rules_versions_insert.sql` | `sp_site_rules_versions_insert` | Insert versioned rules JSON; auto-increments version; deactivates prior active version if `i_is_active = TRUE` |
+| `0140_sp_site_rules_versions_list.sql` | `sp_site_rules_versions_list` | List all versions for a site ordered by `version DESC` (summary only — no `rules_json`) |
+| `0141_sp_site_rules_versions_get_active.sql` | `sp_site_rules_versions_get_active` | Get the single active version including full `rules_json`; returns zero rows if none active |
+
+### Key Decisions
+
+- **Numbering starts at 0129, not 0104**: The procs directory already had files 0104–0128 from prior sessions. Renumbering was required to avoid collision.
+- **No outer `BEGIN`/`END` wrapper**: Pure proc files do not use the migration-style outer wrapper. Consistent with the 0103-style files already in the codebase.
+- **`site_selector_entries_insert` does not upsert**: Multiple selectors per `(site_id, element_key)` are valid (fallback chain via `fallback_order`), so a plain `INSERT` without `ON CONFLICT` is correct. The caller manages deduplication at the application layer.
+- **`sp_site_rules_versions_insert` deactivates prior active versions atomically**: The deactivation `UPDATE` and the new `INSERT` occur in the same transaction block, preventing two simultaneously active versions.
+- **Partial update pattern**: All `_update` procs use `COALESCE(i_param, column)` so the caller can pass `NULL` to leave any field unchanged — avoids requiring full object hydration before update.
+
+### Database Status
+
+These 13 functions are **not yet applied to the live database**. They depend on the following tables which must exist before the procs can be registered:
+- `site_capabilities` (unique constraint on `(site_id, capability_key)`)
+- `site_flow_mappings` (unique constraint on `(site_id, flow_key)`)
+- `site_selector_entries`
+- `site_rules_versions`
+
+Apply the corresponding migration(s) first, then run procs 0129–0141 in order.
+
+### Lessons Learned
+
+- **Always `ls` the target directory before numbering new files**: Proc directories can advance faster than expected when multiple sessions run in parallel. Checking the highest existing number before writing prevents collision.
+- **Distinguish insert-with-fallback from upsert**: For entities that intentionally allow multiple rows per natural key (e.g., selector fallback chains), do not use `ON CONFLICT DO UPDATE` — it would silently overwrite valid alternate selectors.
 
 ---
 
