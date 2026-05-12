@@ -677,3 +677,318 @@ This plan is considered ready to implement when the user confirms:
 ## 21. Implementation Notes
 
 This master plan is now the authoritative reference. Implementation proceeds step-by-step through Phase 0 tasks in §16.2. Each task is considered complete only when its acceptance criteria are met and the next task begins. The Phase 0 exit gate (§16.3) must be satisfied before Phase 1 work begins.
+
+---
+
+## 22. Phase Completion Status (as of May 11, 2026)
+
+**Status Update**: All original 9 phases (0-9) have been completed beyond the original v1 scope. The platform is feature-complete per the full master plan with 277/277 tests passing.
+
+### Completed Phases
+
+| Phase | Status | Description |
+|---|---|---|
+| Phase 0 | ✅ Complete | Bootable monorepo, database, dashboard, runner, Docker, logging |
+| Phase 1 | ✅ Complete | Auth, RBAC, vault, secrets, CRUD UIs, integration tests |
+| Phase 2 | ✅ Complete | Site management, environments, bindings, onboarding wizard |
+| Phase 3 | ✅ Complete | Persona engine, playwright-core, runner service, friction telemetry |
+| Phase 4 | ✅ Complete | Flow templates, approval engine, live dashboard approvals |
+| Phase 5 | ✅ Complete | Email validation module, checkout with sandbox payments |
+| Phase 6 | ✅ Complete | API testing layer (reachability, schema, business rules, cross-validation) |
+| Phase 7 | ✅ Complete | Admin/back-office coverage (5 admin flows) |
+| Phase 8 | ✅ Complete | Ollama integration (selector healing, failure summarization, benchmarking) |
+| Phase 9 | ✅ Complete | Narrative reporting layer (persona summaries, accessibility, issues, LLM analysis) |
+| Phase 10 | ✅ Complete | Production hardening: DB backup automation, security review (20 findings), CI/CD pipelines, vault runbook |
+
+---
+
+## 23. Post-Phase 9 Roadmap: Production Hardening & Operational Maturity
+
+**Strategic Decision**: Accept expanded scope and pivot to production hardening roadmap (May 11, 2026)
+
+Since the platform is feature-complete, the focus shifts to production readiness, operational documentation, and scalability.
+
+### Phase 10: Production Hardening Foundation — ✅ Complete (May 11, 2026)
+
+**Objective**: Establish production-grade infrastructure and security posture before deployment.
+
+| Task | Description | Status |
+|---|---|---|
+| 10.1 | Database backup strategy and automation (PostgreSQL pg_dump, cron scheduling, retention policy) | ✅ Complete |
+| 10.2 | Security review and penetration testing plan (OWASP Top 10, authentication, authorization, encryption) | ✅ Complete |
+| 10.3 | CI/CD templates and deployment automation (GitHub Actions, environment configs) | ✅ Complete |
+| 10.4 | Vault runbook documentation (bootstrap, master-password rotation, KDF upgrade, emergency lock-out recovery) | ✅ Complete |
+
+### Phase 11: Operational Documentation (MEDIUM Priority)
+
+**Objective**: Create comprehensive runbooks for day-to-day operations and incident response.
+
+| Task | Description |
+|---|---|
+| 11.1 | Retention enforcement audits and cleanup job verification |
+| 11.2 | Site onboarding runbook for new sites |
+| 11.3 | Troubleshooting runbook for common issues |
+| 11.4 | Disaster recovery runbook |
+
+### Phase 12: Performance Optimization (MEDIUM Priority)
+
+**Objective**: Optimize database queries and runner performance for production workloads.
+
+| Task | Description |
+|---|---|
+| 12.1 | Database query analysis and indexing review |
+| 12.2 | Runner concurrency tuning and resource profiling |
+
+### Phase 13: Expansion Readiness (LOW Priority)
+
+**Objective**: Prepare infrastructure for multi-site deployments beyond Yugal Kunj.
+
+| Task | Description |
+|---|---|
+| 13.1 | Template for new site setup (beyond Yugal Kunj) |
+| 13.2 | Multi-site tenant isolation review |
+
+---
+
+## 24. Generic QA Automation Product Roadmap
+
+**Strategic Decision**: Expand the platform from a Yugal Kunj-focused QA system into a generic QA automation product for registration, login, email verification, payment, and admin/back-office workflows.
+
+**Target Use Case**: Any registration-oriented website where QA must validate account creation, login, transactional emails, payment through Authorize.net or similar providers, admin reconciliation, accessibility, API correctness, and stakeholder reporting.
+
+### Phase 14: Generic Registration Site Model
+
+**Objective**: Replace site-specific assumptions with a reusable site capability and adapter model.
+
+#### Specifications
+
+- A site can declare supported capabilities: registration, login, logout, email verification, password reset, profile update, checkout/payment, admin lookup, cancellation/refund, and reporting.
+- A site can map generic flow names to concrete implementations or configuration-driven templates.
+- Selectors must support CSS, XPath, ARIA role, visible text, and test-id patterns.
+- All persisted configuration must be stored through stored procedures; application code must not write ad-hoc SQL.
+- Site rules must remain versionable and auditable.
+
+#### Tasks
+
+| Task | Description | Acceptance Criteria |
+|---|---|---|
+| 14.1 | Generic site capability model | DB tables/procs represent per-site capabilities; dashboard can display enabled/disabled capabilities. |
+| 14.2 | Standard site flow contract | Canonical flow keys exist for `register`, `verify_email`, `login`, `logout`, `password_reset`, `profile_update`, `checkout`, `payment_receipt_validation`, and `admin_reconciliation`. |
+| 14.3 | Generic selector dictionary | Site config supports structured selector entries with fallback order and human-readable labels. |
+| 14.4 | Site rules schema v2 | `packages/rules` validates registration fields, login strategy, email expectations, payment rules, admin reconciliation rules, and cleanup policy. |
+| 14.5 | Site onboarding wizard v2 | Dashboard wizard lets an operator configure capabilities, flow mappings, selectors, and rules for a new site. |
+
+#### Exit Criteria
+
+- A new registration site can be represented without changing core runner code.
+- Existing Yugal Kunj rules can be migrated or adapted to the generic model.
+- Integration tests cover capability, selector, and rules validation paths.
+
+### Phase 15: Generic Account Lifecycle Automation
+
+**Objective**: Provide reusable account lifecycle flows for registration-oriented websites.
+
+#### Specifications
+
+- Registration must use persona-aware generated identity data.
+- Login must support email/password, username/password, magic link, email OTP, and manual/SSO approval-gated strategies.
+- Email verification must support both link extraction and code extraction.
+- Password reset must be independently testable.
+- Test account cleanup must be tracked and auditable.
+
+#### Tasks
+
+| Task | Description | Acceptance Criteria |
+|---|---|---|
+| 15.1 | Registration flow template | Template reads site field mapping and persona data, submits registration, and validates success/failure. |
+| 15.2 | Login strategy framework | Pluggable login strategies support password, magic link, OTP, and manual approval-gated SSO. |
+| 15.3 | Email verification flow | Runner waits for verification email, extracts link/code, completes verification, and records result. |
+| 15.4 | Password reset flow | Runner triggers reset, consumes reset email, changes password, and verifies new login. |
+| 15.5 | Test account cleanup | Cleanup status is tracked per generated account; destructive cleanup requires approval when configured. |
+
+#### Exit Criteria
+
+- A site configured with generic selectors can run register → verify email → login → logout without custom flow code.
+- Account lifecycle results appear in run detail and narrative reports.
+- Failure modes include clear step-level diagnostics.
+
+### Phase 16: Generic Email Provider Layer
+
+**Objective**: Make email validation portable across providers and inbox strategies.
+
+#### Specifications
+
+- Supported provider abstractions: IMAP, Gmail API, Mailtrap, Mailosaur, local Mailcatcher, and webhook/inbound parse.
+- Email bindings can attach to site, environment, role tag, persona, flow type, or campaign.
+- Assertions must support subject, sender, body text, HTML, link extraction, brand/footer checks, and timing SLA checks.
+- Correlation must support plus-addressing and non-plus-addressing strategies.
+
+#### Tasks
+
+| Task | Description | Acceptance Criteria |
+|---|---|---|
+| 16.1 | Email provider abstraction | `@qa-platform/email` exposes provider interface and at least IMAP + one test-provider implementation. |
+| 16.2 | Email inbox binding v2 | DB/procs and UI support binding inboxes by site/env/persona/flow/role. |
+| 16.3 | Email template assertions | Assertions validate registration, verification, password reset, receipt, and notification emails. |
+| 16.4 | Email timing SLAs | Delivery latency and timeout results are persisted and reported. |
+| 16.5 | Email correlation strategy | Config supports plus-addressing, generated inboxes, and unique subject/body tokens. |
+
+#### Exit Criteria
+
+- The same email validation flow can run against at least two provider strategies.
+- Email validation failures are visible in reports with correlation token, expected assertion, actual result, and timing.
+
+### Phase 17: Authorize.net Payment Automation
+
+**Objective**: Add first-class Authorize.net sandbox payment automation and verification.
+
+#### Specifications
+
+- Payment provider API must be generic enough to add Stripe, PayPal, or other providers later.
+- Authorize.net sandbox must support successful cards, declined cards, AVS/CVV cases, duplicate transaction handling, voids, and refunds.
+- Browser automation must support direct fields, Accept.js tokenization, and hosted/iframe payment forms.
+- Payment credentials and sandbox cards must be vault-backed.
+- Payment validation must reconcile UI, email receipt, Authorize.net transaction status, and admin/back-office records where available.
+
+#### Tasks
+
+| Task | Description | Acceptance Criteria |
+|---|---|---|
+| 17.1 | Payment provider interface | Generic contract supports authorize, capture, void, refund, receipt validation, and transaction status validation. |
+| 17.2 | Authorize.net sandbox provider | Provider calls sandbox API, handles credentials from vault, and supports known sandbox response scenarios. |
+| 17.3 | Accept.js / hosted form support | Runner can fill/tokenize payment forms including iframes and hosted fields. |
+| 17.4 | Payment profile vault binding | Sandbox cards are stored as secrets and bound by site/env/persona/scenario. |
+| 17.5 | Payment verification | Verification combines UI confirmation, email receipt, provider transaction status, and optional admin reconciliation. |
+| 17.6 | Refund/void test flow | Optional approval-gated flow validates void/refund behavior and records outcome. |
+
+#### Exit Criteria
+
+- A configured site can run checkout with Authorize.net sandbox using success and decline scenarios.
+- No card numbers, CVV values, API keys, tokens, or transaction secrets appear in logs or reports unredacted.
+- Payment results appear in run detail, API/payment panels, and narrative reports.
+
+### Phase 18: Generic Flow Builder and Recorder
+
+**Objective**: Reduce custom engineering required for onboarding new sites and maintaining flows.
+
+#### Specifications
+
+- Flow definitions must be versioned.
+- Flow changes must be auditable.
+- LLM selector healing can suggest fixes, but human approval is required before updating stored flow configuration.
+- Recorded Playwright scripts must be converted into the platform's flow DSL or reviewed template steps.
+
+#### Tasks
+
+| Task | Description | Acceptance Criteria |
+|---|---|---|
+| 18.1 | Flow template library | Standard templates exist for registration, login, verification, checkout, receipt validation, and admin reconciliation. |
+| 18.2 | Visual flow builder | UI supports step types: navigate, fill, click, wait for email, extract code/link, assert text, call API, approval gate, accessibility check. |
+| 18.3 | Playwright recorder import | Recorded scripts can be imported into draft flow definitions for review. |
+| 18.4 | Selector healing workflow | Broken selectors generate suggested replacements; approved suggestions update versioned config. |
+| 18.5 | Versioned flow definitions | Runs record the flow version used; rollback to prior versions is supported. |
+
+#### Exit Criteria
+
+- A QA/developer can create a simple registration flow from UI/recorder without changing core runner code.
+- Flow version is visible in run details and reports.
+
+### Phase 19: Test Data Management
+
+**Objective**: Make generated users, emails, payment attempts, and cleanup reliable and auditable.
+
+#### Specifications
+
+- Generated identities must include realistic names, addresses, phone numbers, DOBs, emergency contacts, and custom site fields.
+- All generated data must be linked to run, execution, persona, site, environment, and cleanup status.
+- PII and sensitive values must be redacted from logs, traces, screenshots where feasible, and reports.
+- Cleanup must avoid deleting unrelated data and must require approval for destructive actions.
+
+#### Tasks
+
+| Task | Description | Acceptance Criteria |
+|---|---|---|
+| 19.1 | Test identity generator | Generates persona-aware realistic data with site-specific required fields. |
+| 19.2 | Data collision avoidance | Guarantees unique email/username/phone/registration identifiers per run where required. |
+| 19.3 | Test data ledger | DB/procs track generated data, linked run context, and cleanup status. |
+| 19.4 | Cleanup and retention | Cleanup jobs handle test users, registrations, emails, payment artifacts, screenshots, videos, and traces. |
+| 19.5 | Sensitive data redaction | Logs/reports/artifacts redact passwords, tokens, card data, CVV, and configured PII fields. |
+
+#### Exit Criteria
+
+- Every generated account and payment attempt is traceable to a run and cleanup state.
+- Cleanup process can produce a reviewable plan before execution.
+- Redaction tests cover common sensitive fields.
+
+### Phase 20: Generic QA Orchestration
+
+**Objective**: Turn individual flows into reusable QA campaigns and release-certification workflows.
+
+#### Specifications
+
+- Campaigns can represent smoke, regression, release certification, payment certification, accessibility audit, and email deliverability checks.
+- Scenario matrices must combine site, environment, persona, browser, device, network, payment scenario, email provider, and flow type.
+- Scheduling must support manual, nightly, pre-release, and deployment-webhook triggered runs.
+- Approval gates must protect payment submission, admin edits, refunds/voids, destructive cleanup, and production-environment runs.
+
+#### Tasks
+
+| Task | Description | Acceptance Criteria |
+|---|---|---|
+| 20.1 | QA campaign model | DB/procs and UI define reusable campaigns with selected flows and matrix dimensions. |
+| 20.2 | Scenario matrix builder | UI estimates execution count and materializes combinations safely with concurrency caps. |
+| 20.3 | Scheduling | Campaigns can run manually and by schedule; deployment webhook contract is documented. |
+| 20.4 | Approval gates | Configurable approval policies protect risky actions and production execution. |
+| 20.5 | QA sign-off workflow | Campaign summary supports pass/fail decision, unresolved defects, approvals, and exception notes. |
+
+#### Exit Criteria
+
+- QA can create and rerun a release certification campaign without custom code.
+- Campaign output clearly separates deterministic failures, friction findings, email failures, payment failures, API failures, and accessibility issues.
+
+### Phase 21: Generic Reporting and Defect Output
+
+**Objective**: Make QA results actionable for business stakeholders, QA teams, and developers.
+
+#### Specifications
+
+- Reports must support business-friendly summaries and developer drill-down.
+- Defect export must support at least CSV first, with extensible interfaces for GitHub Issues, Jira, and Azure DevOps.
+- Release certification reports must include environment, build/version, scenario matrix, pass/fail status, unresolved defects, known exceptions, and approval trail.
+
+#### Tasks
+
+| Task | Description | Acceptance Criteria |
+|---|---|---|
+| 21.1 | Defect export | CSV export exists; provider interface prepared for GitHub/Jira/Azure DevOps. |
+| 21.2 | Business QA report | Report summarizes registration success, email delivery, payment status, friction, accessibility, and persona impact. |
+| 21.3 | Developer debug report | Report links trace, screenshots, video, console errors, network failures, API mismatches, and selector failures. |
+| 21.4 | Release certification report | Final sign-off artifact includes scope, environment, build/version, matrix, unresolved defects, exceptions, and approvals. |
+
+#### Exit Criteria
+
+- A completed QA campaign can produce a stakeholder report and developer defect package.
+- Exported defect rows contain enough context to reproduce or triage failures.
+
+### Recommended Execution Order for Generic Product Work
+
+1. Phase 14: Generic Registration Site Model
+2. Phase 15: Generic Account Lifecycle Automation
+3. Phase 17: Authorize.net Payment Automation
+4. Phase 16: Generic Email Provider Layer
+5. Phase 19: Test Data Management
+6. Phase 20: Generic QA Orchestration
+7. Phase 18: Generic Flow Builder and Recorder
+8. Phase 21: Generic Reporting and Defect Output
+
+### Minimum Product Bar for a Generic QA Automation Solution
+
+| Category | Required Capability |
+|---|---|
+| Site model | Generic site adapter, capabilities, rules, selectors, and flow mappings |
+| Account lifecycle | Registration, verification, login, password reset, logout, and cleanup |
+| Email | Provider abstraction, correlation, assertions, timing SLA, receipt validation |
+| Payments | Authorize.net sandbox support, provider abstraction, secure vault-backed profiles |
+| Orchestration | Campaigns, scenario matrices, scheduling, approval gates |
+| Data management | Test identity generation, ledger, cleanup, retention, redaction |
+| Reporting | Business report, developer drill-down, defect export, release certification |

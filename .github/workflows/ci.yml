@@ -1,0 +1,184 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────
+  # Job 1: Lint & Type-check
+  # ─────────────────────────────────────────────
+  lint-and-typecheck:
+    name: Lint & Type-check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Setup Node.js 20 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint (turbo)
+        run: pnpm run lint
+
+      - name: Type-check (turbo)
+        run: pnpm run typecheck
+
+  # ─────────────────────────────────────────────
+  # Job 2: Test (needs lint-and-typecheck)
+  # ─────────────────────────────────────────────
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: qa_platform_test
+          POSTGRES_USER: qa_user
+          POSTGRES_PASSWORD: qa_password_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U qa_user -d qa_platform_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: qa_platform_test
+      POSTGRES_USER: qa_user
+      POSTGRES_PASSWORD: qa_password_test
+      DATABASE_URL: postgresql://qa_user:qa_password_test@localhost:5432/qa_platform_test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Setup Node.js 20 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run database migrations
+        run: pnpm --filter @qa-platform/db run migrate
+
+      - name: Run tests with coverage
+        run: pnpm run test:coverage
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 14
+
+  # ─────────────────────────────────────────────
+  # Job 3: Build (needs lint-and-typecheck)
+  # ─────────────────────────────────────────────
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: lint-and-typecheck
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Setup Node.js 20 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build all packages and apps (turbo)
+        run: pnpm run build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          # Capture compiled dist outputs and Next.js standalone output
+          path: |
+            apps/dashboard-web/.next/standalone
+            apps/dashboard-web/.next/static
+            apps/runner/dist
+            packages/*/dist
+          retention-days: 7
+          if-no-files-found: warn
+
+  # ─────────────────────────────────────────────
+  # Job 4: Docker build validation (needs test + build)
+  # ─────────────────────────────────────────────
+  docker-build:
+    name: Docker Build (validation)
+    runs-on: ubuntu-latest
+    needs: [test, build]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build dashboard Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/dashboard/Dockerfile
+          push: false
+          tags: qa-platform/dashboard:${{ github.sha }}
+          cache-from: type=gha,scope=dashboard
+          cache-to: type=gha,mode=max,scope=dashboard
+
+      - name: Build runner Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/runner/Dockerfile
+          push: false
+          tags: qa-platform/runner:${{ github.sha }}
+          cache-from: type=gha,scope=runner
+          cache-to: type=gha,mode=max,scope=runner

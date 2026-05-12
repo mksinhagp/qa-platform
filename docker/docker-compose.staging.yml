@@ -1,0 +1,85 @@
+# docker/docker-compose.staging.yml
+#
+# Staging environment override for docker-compose.yml.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker/docker-compose.staging.yml up -d
+#
+# What this file does:
+#   - Removes source-code bind mounts (production images only)
+#   - Forces NODE_ENV=production on all services
+#   - Adds restart: unless-stopped to all long-running services
+#   - Configures structured JSON logging with rotation limits
+#   - Excludes ollama and mailcatcher (dev-only services)
+
+services:
+  postgres:
+    restart: unless-stopped
+    # No volume override needed — pg_data named volume is kept.
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-qa_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-qa_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  migrator:
+    # Run once on deploy; do not restart automatically.
+    restart: "no"
+    environment:
+      NODE_ENV: production
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-qa_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-qa_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  dashboard-web:
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DASHBOARD_PORT: 3000
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-qa_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-qa_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      DASHBOARD_SESSION_SECRET: ${DASHBOARD_SESSION_SECRET:?DASHBOARD_SESSION_SECRET is required}
+    # Remove any bind-mount volumes from the base compose file
+    volumes: []
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  runner:
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+    # Remove any bind-mount volumes from the base compose file
+    volumes: []
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Explicitly exclude ollama and mailcatcher from staging
+  # by setting their profiles to a value that is never activated.
+  ollama:
+    profiles:
+      - never
+
+  mailcatcher:
+    profiles:
+      - never

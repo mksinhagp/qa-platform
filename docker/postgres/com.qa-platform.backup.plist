@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.qa-platform.backup.plist
+  macOS launchd agent — QA Automation Platform daily PostgreSQL backup
+
+  Runs: docker compose --profile backup run --rm backup
+  Schedule: daily at 02:00 AM
+  Logs: /tmp/qa-platform-backup.log (stdout + stderr combined)
+
+  Installation:
+    cp docker/postgres/com.qa-platform.backup.plist \
+       ~/Library/LaunchAgents/com.qa-platform.backup.plist
+    launchctl load ~/Library/LaunchAgents/com.qa-platform.backup.plist
+
+  Manual trigger (without waiting for the schedule):
+    launchctl start com.qa-platform.backup
+
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.qa-platform.backup.plist
+    rm ~/Library/LaunchAgents/com.qa-platform.backup.plist
+
+  See docs/runbooks/backup-cron.md for full details.
+-->
+<plist version="1.0">
+<dict>
+
+  <!-- Unique label for this agent -->
+  <key>Label</key>
+  <string>com.qa-platform.backup</string>
+
+  <!-- Command to execute -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/docker</string>
+    <string>compose</string>
+    <string>--profile</string>
+    <string>backup</string>
+    <string>run</string>
+    <string>--rm</string>
+    <string>backup</string>
+  </array>
+
+  <!-- Working directory must be the project root so docker compose
+       can locate docker-compose.yml and the .env file. -->
+  <key>WorkingDirectory</key>
+  <string>/Users/mksmoshome/Library/CloudStorage/OneDrive-Personal/Projects/WebsiteTester</string>
+
+  <!-- Run daily at 02:00 AM local time -->
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>2</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+
+  <!-- Combined stdout + stderr log file -->
+  <key>StandardOutPath</key>
+  <string>/tmp/qa-platform-backup.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/tmp/qa-platform-backup.log</string>
+
+  <!-- Automatically load when user logs in -->
+  <key>RunAtLoad</key>
+  <false/>
+
+  <!-- Keep the job alive on failure (false = one-shot, do not restart) -->
+  <key>KeepAlive</key>
+  <false/>
+
+  <!-- PATH must include the directory containing the docker binary.
+       Docker Desktop installs to /usr/local/bin on macOS by default. -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+</dict>
+</plist>

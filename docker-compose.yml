@@ -93,9 +93,38 @@ services:
     networks:
       - qa-platform-network
 
+  # ---------------------------------------------------------------------------
+  # Backup service — only runs when explicitly invoked via:
+  #   docker compose --profile backup run --rm backup
+  # Shares the same postgres image so pg_dump version always matches the server.
+  # ---------------------------------------------------------------------------
+  backup:
+    image: postgres:16-alpine
+    container_name: qa-platform-backup
+    profiles:
+      - backup
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: qa_platform
+      POSTGRES_USER: qa_user
+      POSTGRES_PASSWORD: qa_password
+      BACKUP_DIR: /backups
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+    volumes:
+      - backups:/backups
+      - ./docker/postgres/backup.sh:/usr/local/bin/backup.sh:ro
+    command: ["/bin/sh", "-c", "chmod +x /usr/local/bin/backup.sh && /usr/local/bin/backup.sh"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - qa-platform-network
+
 volumes:
   pg_data:
   ollama_models:
+  backups:
 
 networks:
   qa-platform-network:

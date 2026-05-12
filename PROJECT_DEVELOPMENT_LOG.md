@@ -3721,9 +3721,36 @@ The master plan now recommends this order for generic product work:
 
 ---
 
-## June 2026 — Phase 10.1: Database Backup Strategy & Automation
+## May 11, 2026 — Phase 10: Production Hardening Foundation
 
-**Date**: 2026-06  
+**Date**: May 11, 2026  
+**Task Reference**: Master Plan §23, Phase 10 (Tasks 10.1–10.4)
+
+### Phase 10 Overview
+
+Phase 10 completes the Production Hardening Foundation milestone. All four tasks were executed in parallel on May 11, 2026. The platform transitions from feature-complete to production-ready with this phase.
+
+| Task | Title | Status | Primary Deliverables |
+|---|---|---|---|
+| 10.1 | Database Backup Strategy & Automation | Complete | `backup.sh`, `restore.sh`, Compose backup service, macOS launchd plist, backup runbook |
+| 10.2 | Security Review & Penetration Testing Plan | Complete | `docs/decisions/006-security-review.md` (20 findings), `docs/runbooks/pen-test-plan.md` (85 test cases) |
+| 10.3 | CI/CD Templates & Deployment Automation | Complete | 3 GitHub Actions workflows, staging compose override, `scripts/deploy.sh`, CI/CD runbook |
+| 10.4 | Vault Runbook Documentation | Complete | `docs/runbooks/vault-runbook.md` (714 lines, 10 sections), `docs/decisions/007-vault-operations-policy.md` |
+
+### Phase 10 Cross-Cutting Decisions
+
+1. **No application code modified in Phase 10**: All tasks produced infrastructure scripts, GitHub Actions workflows, and documentation only. This was intentional — hardening before next feature work.
+
+2. **Security findings documented but not fixed in this phase**: The 20 security findings from Task 10.2 are catalogued with severity and recommendations. Five pre-production gate findings (F-01 through F-04, F-08) must be resolved before any non-localhost deployment. These become Phase 10 code review work items.
+
+3. **Parallel execution was viable because tasks touch orthogonal concerns**: backup (Docker/Compose), security (docs/review), CI/CD (.github/workflows + scripts), vault docs (docs/runbooks). No file conflicts.
+
+4. **Correct date on all entries is May 11, 2026**: The active development session date. Prior subagent entries used placeholder dates (June 2026, July 2025, May 27, 2026) which have been corrected to May 11, 2026 throughout.
+
+---
+
+## May 11, 2026 — Phase 10.1: Database Backup Strategy & Automation
+
 **Task Reference**: Phase 10.1 — Production-grade PostgreSQL backup strategy
 
 ### Objective
@@ -3828,7 +3855,7 @@ macOS launchd plist:
 
 ---
 
-## May 27, 2026
+## May 11, 2026 — Phase 10.3: CI/CD Templates & Deployment Automation
 
 ### Phase 10.3 Completed: CI/CD Templates & Deployment Automation
 
@@ -3920,7 +3947,7 @@ macOS launchd plist:
 
 ---
 
-## May 11, 2026
+## May 11, 2026 — Phase 10.4: Vault Runbook Documentation
 
 ### Phase 10.4 Completed: Vault Runbook Documentation
 
@@ -4068,6 +4095,97 @@ macOS launchd plist:
 
 #### Typecheck Result
 All 15 turbo typecheck tasks passed with 0 errors (`pnpm typecheck` exit 0).
+
+---
+
+## May 11, 2026 — Phase 10.2: Security Review & Penetration Testing Plan
+
+### Phase 10.2 Completed: Security Review & Penetration Testing Plan
+
+**Task Reference**: Phase 10.2 — Security Review & Penetration Testing Plan
+
+#### Work Completed
+
+**Research phase — all source files read before writing:**
+- `packages/auth/src/password.ts` — Argon2id parameters, salt handling, sentinel hash for timing safety, `needsRehash` support
+- `packages/auth/src/sessions.ts` — token entropy (256-bit), idle + absolute TTL, cookie flags
+- `packages/auth/src/capabilities.ts` — capability resolution via `sp_capabilities_for_operator`, `hasCapability`, `hasAnyCapability`, `hasAllCapabilities`
+- `packages/auth/src/guards.ts` — `requireOperator`, `requireCapability`, `requireAnyCapability`, `UnauthorizedError`, `ForbiddenError`
+- `packages/vault/src/crypto.ts` — AES-256-GCM encrypt/decrypt, nonce generation, AAD usage, DEK/RVK/KEK generation, `zeroize`
+- `packages/vault/src/vault.ts` — bootstrap, unlock, lock, `withUnlocked`, `encryptSecret`, `decryptSecret`
+- `packages/vault/src/registry.ts` — singleton `UnlockSessionRegistry`, absolute TTL + idle reset, `zeroize` on remove, 60s cleanup interval
+- `apps/dashboard-web/app/actions/auth.ts` — login sentinel hash, cookie flags, inactive-account message leak gap
+- `apps/dashboard-web/app/actions/vault.ts` — vault server actions, `unlock_token` cookie flags, unauthenticated `getVaultStateAction` gap
+- `apps/dashboard-web/app/actions/credentials.ts` — `secret.reveal` capability gate, vault decrypt flow, audit logging
+- `apps/dashboard-web/app/actions/operators.ts` — operator CRUD, missing Zod validation gap
+- `apps/dashboard-web/app/actions/payment-profiles.ts` — vault encrypt, non-atomic secret+profile insert gap
+- `apps/dashboard-web/app/actions/sites.ts` — Zod validation (strong), SSRF risk via `base_url` (accepts RFC-private IPs)
+- `apps/dashboard-web/app/actions/runs.ts` — Zod validation, `run.execute` / `run.read` capability gates
+- `apps/dashboard-web/app/actions/audit.ts` — `requireOperator` only (no `audit.read` capability), all logs visible to any operator
+- `apps/dashboard-web/app/api/runner/callback/route.ts` — one-time callback token auth, Zod schemas for typed payloads, missing Zod on `execution_result` branch
+- `apps/dashboard-web/app/api/runner/approvals/[approvalId]/poll/route.ts` — token-gated approval poll
+- `apps/dashboard-web/app/api/runner/email-validate/route.ts` — vault unlock dependency on runner callback path
+- `docker-compose.yml` — hardcoded DB credentials, no TLS, runner port exposed to host
+- `docker/dashboard/Dockerfile`, `docker/runner/Dockerfile` — non-root users confirmed, no `--cap-drop`
+- `apps/dashboard-web/next.config.ts` — no `headers()` CSP/HSTS configuration
+- `.env.example` — `POSTGRES_SSL_MODE=disable`, `AUTH_PASSWORD_MIN_LENGTH=8`
+
+**Documents created:**
+
+1. **`docs/decisions/006-security-review.md`** (501 lines)
+   - Section A: Auth & Session Management — Argon2id parameter analysis, timing-attack sentinel hash review, session TTL gaps, vault unlock token lifecycle
+   - Section B: Authorization & RBAC — capability model strengths/gaps, missing middleware guard, `getVaultStateAction` no-auth finding, site-scoped authorization gap
+   - Section C: Vault & Cryptography — AES-256-GCM nonce/AAD review, DEK/KEK/RVK zeroization audit, key lifecycle table
+   - Section D: API & Input Validation — Zod coverage by action file, SSRF via `base_url`, prototype pollution (low risk), XSS (mitigated by React + gaps in CSP)
+   - Section E: Infrastructure — Docker network topology, hardcoded DB creds, TLS absence, container privilege audit
+   - Section F: OWASP Top 10 (2021) mapping — all 10 categories rated with specific notes
+   - Section G: Priority findings table — 20 findings (F-01 through F-20) with severity, status, and recommendation
+
+2. **`docs/runbooks/pen-test-plan.md`** (495 lines)
+   - Section A: Scope & objectives — in-scope (dashboard-web, runner API, PostgreSQL, vault, auth), out-of-scope (host OS, CI/CD)
+   - Section B: Test environment — docker compose isolated spin-up procedure, 4 test accounts with roles, tool list (ZAP, Burp, sqlmap, nuclei, ffuf, hydra)
+   - Section C: 85 test cases across 7 categories: Authentication Bypass (12), Authorization Bypass (12), Vault Security (12), Input Validation (15), API Security (10), Infrastructure (12), Secrets Exposure (12)
+   - Section D: Finding report template (PTFIND-NNN format)
+   - Section E: Remediation priority matrix — Critical (24h), High (1 week), Medium (30 days), Low (90 days)
+   - Section F: Retesting protocol
+   - Section G: Tooling quick reference — exact CLI commands for ZAP, Burp, sqlmap, nuclei, ffuf, hydra, curl
+   - Section H: Results summary table template
+
+#### Files Created / Modified
+
+| File | Action | Lines |
+|---|---|---|
+| `docs/decisions/006-security-review.md` | Created | 501 |
+| `docs/runbooks/pen-test-plan.md` | Created | 495 |
+| `PROJECT_DEVELOPMENT_LOG.md` | Updated | This entry |
+
+#### Key Findings (Top 5 by Severity)
+
+| Finding | Severity | Description |
+|---|---|---|
+| F-01 | Critical | No TLS — all session tokens, vault unlock tokens, and credentials travel in plaintext |
+| F-02 | High | No login or vault unlock rate limiting / brute-force lockout |
+| F-03 | High | SSRF via `base_url` — Zod `.url()` accepts RFC-private IPs; runner would connect to internal services |
+| F-04 | High | PostgreSQL credentials hardcoded in `docker-compose.yml` (not using `${VAR:?required}` pattern) |
+| F-05 | Medium | Inactive account returns distinct error message, leaking account existence |
+
+#### Decisions Made
+
+- 20 findings documented (F-01 through F-20); all grounded in specific file paths and line numbers from the codebase.
+- No application code was modified — this is a pure documentation task per Phase 10.2 specification.
+- Pen test plan written as a standing runbook that can be re-executed after any remediation cycle using the retesting protocol in Section F.
+- 85 total test cases across 7 categories, each with a specific test ID, method, expected result, and pass criteria.
+- Pre-production gate established: 5 findings (F-01, F-02, F-03, F-04, F-08) must be `Verified Closed` before any non-localhost deployment.
+
+#### Lessons Learned / Best Practices
+
+- **`getVaultStateAction` has no auth guard** (`vault.ts` line 157): KDF memory, iterations, parallelism, and bootstrap operator ID are returned to any caller. Only visible from reading the implementation directly.
+- **Inactive account error message leak** (`auth.ts` line 52–53): "Operator account is inactive" differs from "Invalid login or password," leaking account existence despite the timing-safe sentinel hash protecting the unknown-user path.
+- **Unlock token is not cryptographically bound to the operator session** (`registry.ts`): `registry.get(unlockToken)` checks only the token, not associated session validity. A stolen `unlock_token` cookie is usable for up to 30 minutes independently.
+- **Missing Next.js `middleware.ts`**: There is no framework-level route protection. Every server action must remember to call `requireOperator()` / `requireCapability()`. One omission = an unprotected endpoint with no safety net.
+- **SSRF via Zod `.url()` validator**: Zod's built-in URL validation does not block RFC-1918 private addresses or `localhost`. An application-level blocklist is required wherever user-supplied URLs drive outbound connections.
+- **`AUTH_PASSWORD_MIN_LENGTH=8` in `.env.example`**: Below the OWASP recommended minimum of 12. The vault correctly enforces 12; operator accounts should match.
+- **Validation coverage is inconsistent**: `sites.ts` and `runs.ts` use Zod schemas thoroughly; `credentials.ts`, `operators.ts`, and `payment-profiles.ts` have none. Consistent use of Zod should be enforced as a code review requirement going forward.
 
 ---
 
