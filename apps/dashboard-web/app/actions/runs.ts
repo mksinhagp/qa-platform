@@ -21,6 +21,10 @@ const createRunSchema = z.object({
   browsers: z.array(z.enum(['chromium', 'firefox', 'webkit'])).min(1, 'At least one browser is required'),
   flow_names: z.array(z.string().min(1)).min(1, 'At least one flow is required'),
   notes: z.string().max(2000).optional(),
+  /** Phase 17: Optional payment scenario IDs for checkout flows.
+   *  When provided, each checkout execution gets a payment_scenario_id
+   *  and the runner resolves provider/scenario from the DB. */
+  payment_scenario_ids: z.array(z.number().int().positive()).optional(),
 });
 
 const runConfigSchema = z.object({
@@ -363,54 +367,90 @@ export async function createRun(data: z.infer<typeof createRunSchema>): Promise<
       }>).find(row => row.o_is_active);
 
     // Materialize executions (cartesian product: personas x browsers x flows x device_profiles x network_profiles)
-    const executions: Array<{ execution_id: number; site_id: string; site_name: string; base_url: string; callback_url: string; callback_token: string; flow_name: string; persona_id: string; browser: string; email_validation?: { inbox_id: number; correlation_token: string; test_email: string; expected_subject_pattern?: string; wait_timeout_ms?: number } }> = [];
+    // Phase 17: For checkout flows with payment_scenario_ids, the product also
+    // includes each payment scenario (one execution per scenario per combination).
+    const executions: Array<{
+      execution_id: number;
+      site_id: string;
+      site_name: string;
+      base_url: string;
+      callback_url: string;
+      callback_token: string;
+      flow_name: string;
+      persona_id: string;
+      browser: string;
+      numeric_site_id?: number;
+      numeric_site_environment_id?: number;
+      payment_scenario_id?: number;
+      email_validation?: {
+        inbox_id: number;
+        correlation_token: string;
+        test_email: string;
+        expected_subject_pattern?: string;
+        wait_timeout_ms?: number;
+      };
+    }> = [];
+
+    const isCheckoutFlow = (name: string) => name === 'checkout' || name.includes('checkout') || name.includes('payment');
+    const paymentScenarioIds = d.payment_scenario_ids ?? [];
     
     for (const personaId of d.persona_ids) {
       for (const browser of d.browsers) {
         for (const flowName of d.flow_names) {
-          for (const deviceProfileId of d.device_profile_ids) {
-            for (const networkProfileId of d.network_profile_ids) {
-              const callbackToken = randomBytes(32).toString('base64url');
-              const callbackUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/runner/callback`;
-              const emailValidation = emailBinding && ['registration', 'checkout'].includes(flowName)
-                ? (() => {
-                    const correlationToken = generateCorrelationToken();
-                    return {
-                      inbox_id: emailBinding.o_email_inbox_id,
-                      correlation_token: correlationToken,
-                      test_email: buildTestEmailAddress(emailBinding.o_username, correlationToken),
-                      expected_subject_pattern: flowName === 'checkout' ? 'confirm' : 'registration',
-                      wait_timeout_ms: 5 * 60 * 1000,
-                    };
-                  })()
-                : undefined;
-              
-              const execResult = await invokeProcWrite('sp_run_executions_insert', {
-                i_run_id: runId,
-                i_persona_id: personaId,
-                i_device_profile_id: deviceProfileId,
-                i_network_profile_id: networkProfileId,
-                i_browser: browser,
-                i_flow_name: flowName,
-                i_callback_token: callbackToken,
-                i_created_by: authContext.operatorId.toString(),
-              });
-              
-              const executionId = execResult[0]?.o_id;
-              if (!executionId) throw new Error('Execution creation returned no ID');
-              
-              executions.push({
-                execution_id: executionId,
-                site_id: d.site_id.toString(),
-                site_name: siteResult.site.name,
-                base_url: environmentResult.environment.base_url || siteResult.site.base_url,
-                callback_url: callbackUrl,
-                callback_token: callbackToken,
-                flow_name: flowName,
-                persona_id: personaId,
-                browser: browser,
-                ...(emailValidation ? { email_validation: emailValidation } : {}),
-              });
+          // Phase 17: For checkout flows with payment scenarios, create one
+          // execution per scenario. For non-checkout or no scenarios, use [undefined].
+          const scenarioIdsForFlow = isCheckoutFlow(flowName) && paymentScenarioIds.length > 0
+            ? paymentScenarioIds
+            : [undefined as number | undefined];
+
+          for (const paymentScenarioId of scenarioIdsForFlow) {
+            for (const deviceProfileId of d.device_profile_ids) {
+              for (const networkProfileId of d.network_profile_ids) {
+                const callbackToken = randomBytes(32).toString('base64url');
+                const callbackUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/runner/callback`;
+                const emailValidation = emailBinding && ['registration', 'checkout'].includes(flowName)
+                  ? (() => {
+                      const correlationToken = generateCorrelationToken();
+                      return {
+                        inbox_id: emailBinding.o_email_inbox_id,
+                        correlation_token: correlationToken,
+                        test_email: buildTestEmailAddress(emailBinding.o_username, correlationToken),
+                        expected_subject_pattern: flowName === 'checkout' ? 'confirm' : 'registration',
+                        wait_timeout_ms: 5 * 60 * 1000,
+                      };
+                    })()
+                  : undefined;
+                
+                const execResult = await invokeProcWrite('sp_run_executions_insert', {
+                  i_run_id: runId,
+                  i_persona_id: personaId,
+                  i_device_profile_id: deviceProfileId,
+                  i_network_profile_id: networkProfileId,
+                  i_browser: browser,
+                  i_flow_name: flowName,
+                  i_callback_token: callbackToken,
+                  i_created_by: authContext.operatorId.toString(),
+                });
+                
+                const executionId = execResult[0]?.o_id;
+                if (!executionId) throw new Error('Execution creation returned no ID');
+                
+                executions.push({
+                  execution_id: executionId,
+                  site_id: d.site_id.toString(),
+                  site_name: siteResult.site.name,
+                  base_url: environmentResult.environment.base_url || siteResult.site.base_url,
+                  callback_url: callbackUrl,
+                  callback_token: callbackToken,
+                  flow_name: flowName,
+                  persona_id: personaId,
+                  browser: browser,
+                  numeric_site_id: d.site_id,
+                  numeric_site_environment_id: d.site_environment_id,
+                  ...(paymentScenarioId ? { payment_scenario_id: paymentScenarioId } : {}),
+                  ...(emailValidation ? { email_validation: emailValidation } : {}),
+                });
+              }
             }
           }
         }

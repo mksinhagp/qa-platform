@@ -72,6 +72,25 @@ export interface ExecutionContext {
     zip: string;
     name: string;
   };
+  /** Payment scenario metadata — populated by the runner when payment_scenario_id
+   *  is present on the execution request. Checkout flows can use this to adjust
+   *  expected-result assertions (e.g. expecting a decline vs. success). */
+  paymentScenario?: {
+    id: number;
+    scenarioType: string;
+    expectedResult: string;
+    testAmount: number;
+    expectedResponseCode?: string;
+    expectedResponseReason?: string;
+  };
+  /** Payment provider metadata — populated alongside paymentScenario so flows
+   *  can conditionally target provider-specific UI (e.g. Stripe Elements vs. Authorize.net inline). */
+  paymentProvider?: {
+    id: number;
+    name: string;
+    providerType: string;
+    isSandbox: boolean;
+  };
 }
 
 // Re-export BrowserCapturedState from shared-types (single source of truth)

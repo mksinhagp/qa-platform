@@ -1,6 +1,6 @@
 // Authorize.net payment provider implementation for Phase 17
-import type { PaymentProvider, PaymentProviderConfig, AuthorizeRequest, AuthorizeResponse, CaptureRequest, CaptureResponse, VoidRequest, VoidResponse, RefundRequest, RefundResponse } from '../provider.js';
-import type { PaymentProviderType } from '../types.js';
+import type { PaymentProvider } from '../provider.js';
+import type { PaymentProviderConfig, AuthorizeRequest, AuthorizeResponse, CaptureRequest, CaptureResponse, VoidRequest, VoidResponse, RefundRequest, RefundResponse } from '../types.js';
 
 export class AuthorizeNetProvider implements PaymentProvider {
   readonly type = 'authorize_net';
@@ -143,7 +143,7 @@ export class AuthorizeNetProvider implements PaymentProvider {
     throw new Error('Production Authorize.net implementation not yet implemented');
   }
 
-  private simulateSandboxRefund(request: RefundRequest): RefundResponse {
+  private simulateSandboxRefund(_request: RefundRequest): RefundResponse {
     return {
       success: true,
       transactionId: `REFUND_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,

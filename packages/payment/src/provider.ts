@@ -36,7 +36,7 @@ export class PaymentProviderRegistry {
     this.providers.set(type, providerClass);
   }
 
-  get(type: string): new (config: PaymentProviderConfig) => PaymentProvider | undefined {
+  get(type: string): (new (config: PaymentProviderConfig) => PaymentProvider) | undefined {
     return this.providers.get(type);
   }
 

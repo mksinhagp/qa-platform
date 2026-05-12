@@ -1,5 +1,5 @@
 // Payment verification logic for Phase 17
-import type { PaymentVerificationResult, AuthorizeResponse, PaymentTransaction } from './types.js';
+import type { PaymentVerificationResult, AuthorizeResponse } from './types.js';
 
 export interface VerificationContext {
   uiConfirmation?: string;

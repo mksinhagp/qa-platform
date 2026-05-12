@@ -126,9 +126,15 @@ importers:
       '@qa-platform/approvals':
         specifier: workspace:*
         version: link:../../packages/approvals
+      '@qa-platform/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@qa-platform/llm':
         specifier: workspace:*
         version: link:../../packages/llm
+      '@qa-platform/payment':
+        specifier: workspace:*
+        version: link:../../packages/payment
       '@qa-platform/personas':
         specifier: workspace:*
         version: link:../../packages/personas
@@ -310,6 +316,44 @@ importers:
         specifier: ^5.7.2
         version: 5.9.3
 
+  packages/orchestration:
+    dependencies:
+      '@qa-platform/approvals':
+        specifier: workspace:*
+        version: link:../approvals
+      '@qa-platform/db':
+        specifier: workspace:*
+        version: link:../db
+      '@qa-platform/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
+    devDependencies:
+      '@types/node':
+        specifier: ^20.10.0
+        version: 20.19.40
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+
+  packages/payment:
+    dependencies:
+      '@qa-platform/db':
+        specifier: workspace:*
+        version: link:../db
+      '@qa-platform/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
+      '@qa-platform/vault':
+        specifier: workspace:*
+        version: link:../vault
+    devDependencies:
+      '@types/node':
+        specifier: ^20.10.0
+        version: 20.19.40
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+
   packages/personas:
     dependencies:
       '@qa-platform/shared-types':
@@ -354,6 +398,22 @@ importers:
 
   packages/shared-types:
     devDependencies:
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+
+  packages/test-data:
+    dependencies:
+      '@qa-platform/db':
+        specifier: workspace:*
+        version: link:../db
+      '@qa-platform/shared-types':
+        specifier: workspace:*
+        version: link:../shared-types
+    devDependencies:
+      '@types/node':
+        specifier: ^20.10.0
+        version: 20.19.40
       typescript:
         specifier: ^5.3.3
         version: 5.9.3

@@ -19,7 +19,9 @@
     "@qa-platform/approvals": "workspace:*",
     "@qa-platform/rules": "workspace:*",
     "@qa-platform/api-testing": "workspace:*",
-    "@qa-platform/llm": "workspace:*"
+    "@qa-platform/llm": "workspace:*",
+    "@qa-platform/payment": "workspace:*",
+    "@qa-platform/db": "workspace:*"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",

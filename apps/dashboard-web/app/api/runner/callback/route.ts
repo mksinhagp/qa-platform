@@ -108,6 +108,36 @@ const AdminTestResultPayloadSchema = z.object({
   suites: z.array(AdminSuiteSchema).min(1),
 });
 
+// ─── Zod schema for the Phase 17 payment_transaction_result payload ─────────
+
+const PaymentTransactionResultPayloadSchema = z.object({
+  type: z.literal('payment_transaction_result'),
+  execution_id: z.number().int().positive(),
+  site_id: z.number().int().positive(),
+  site_environment_id: z.number().int().positive(),
+  payment_provider_id: z.number().int().positive().nullish(),
+  payment_scenario_id: z.number().int().positive().nullish(),
+  transaction_type: z.enum(['authorize', 'capture', 'void', 'refund']),
+  amount: z.number().nonnegative(),
+  currency: z.string().max(3).default('USD'),
+  provider_transaction_id: z.string().nullish(),
+  provider_response_code: z.string().nullish(),
+  provider_response_reason: z.string().nullish(),
+  provider_response_text: z.string().nullish(),
+  status: z.enum(['pending', 'approved', 'declined', 'error', 'voided', 'refunded']),
+  ui_confirmation: z.string().nullish(),
+  email_receipt_verified: z.boolean().default(false),
+  email_receipt_details: z.string().nullish(),
+  admin_reconciled: z.boolean().default(false),
+  admin_reconciliation_details: z.string().nullish(),
+  error_message: z.string().nullish(),
+  redacted_card_number: z.string().nullish(),
+  redacted_cvv: z.string().nullish(),
+  test_data_generated: z.boolean().default(false),
+  test_data_cleanup_status: z.string().default('pending'),
+  verification_overall_match: z.boolean().default(false),
+});
+
 // Hardcoded fallback strengths — mirrors packages/approvals/src/types.ts DEFAULT_STRENGTHS
 const DEFAULT_STRENGTHS: Record<string, string> = {
   registration_submit: 'one_click',
@@ -373,6 +403,75 @@ export async function POST(request: NextRequest) {
     } catch (err) {
       console.error('LLM analysis result callback error:', { execution_id: executionId, correlation_id: correlationId, error: err });
       return NextResponse.json({ error: 'Failed to record LLM analysis result' }, { status: 500 });
+    }
+  }
+
+  // ─── Handle payment transaction result (Phase 17) ─────────────────────────
+  if (type === 'payment_transaction_result') {
+    const parsed = PaymentTransactionResultPayloadSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: 'Invalid payment_transaction_result payload', details: parsed.error.flatten() },
+        { status: 400 },
+      );
+    }
+    const p = parsed.data;
+
+    try {
+      // Validate token first
+      const tokenRows = await invokeProc('sp_run_executions_validate_token', {
+        i_id: p.execution_id,
+        i_callback_token: token,
+      });
+      type TokenRow = { o_is_valid: boolean };
+      const valid = (tokenRows as TokenRow[])[0]?.o_is_valid === true;
+      if (!valid) {
+        return NextResponse.json({ error: 'Invalid callback token' }, { status: 401 });
+      }
+
+      // Record the payment transaction via the insert stored procedure.
+      // This is idempotent-safe: duplicate callbacks for the same execution
+      // will create additional transaction rows (each with a unique ID).
+      // Cleanup/dedup can be handled by the test data management layer.
+      const txnResult = await invokeProcWrite('sp_payment_transactions_insert', {
+        i_run_execution_id: p.execution_id,
+        i_site_id: p.site_id,
+        i_site_environment_id: p.site_environment_id,
+        i_persona_id: null,
+        i_payment_provider_id: p.payment_provider_id ?? null,
+        i_payment_profile_id: null,
+        i_payment_scenario_id: p.payment_scenario_id ?? null,
+        i_transaction_type: p.transaction_type,
+        i_amount: p.amount,
+        i_currency: p.currency,
+        i_provider_transaction_id: p.provider_transaction_id ?? null,
+        i_provider_response_code: p.provider_response_code ?? null,
+        i_provider_response_reason: p.provider_response_reason ?? null,
+        i_provider_response_text: p.provider_response_text ?? null,
+        i_status: p.status,
+        i_ui_confirmation: p.ui_confirmation ?? null,
+        i_email_receipt_verified: p.email_receipt_verified,
+        i_email_receipt_details: p.email_receipt_details ?? null,
+        i_admin_reconciled: p.admin_reconciled,
+        i_admin_reconciliation_details: p.admin_reconciliation_details ?? null,
+        i_error_message: p.error_message ?? null,
+        i_redacted_card_number: p.redacted_card_number ?? null,
+        i_redacted_cvv: p.redacted_cvv ?? null,
+        i_test_data_generated: p.test_data_generated,
+        i_test_data_cleanup_status: p.test_data_cleanup_status,
+        i_approval_id: null,
+        i_created_by: 'runner',
+      });
+
+      const txnId = (txnResult as Array<{ o_id: number }>)[0]?.o_id;
+      return NextResponse.json({ success: true, transaction_id: txnId ?? null });
+    } catch (err) {
+      console.error('Payment transaction result callback error:', {
+        execution_id: p.execution_id,
+        correlation_id: correlationId,
+        error: err,
+      });
+      return NextResponse.json({ error: 'Failed to record payment transaction' }, { status: 500 });
     }
   }
 

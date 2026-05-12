@@ -37,6 +37,14 @@ import {
   type StepSummaryInput,
   type FrictionSignalInput,
 } from '@qa-platform/llm';
+import {
+  resolvePaymentContext,
+  enrichExecutionContext,
+  executePaymentOperation,
+  buildPaymentTransactionPayload,
+  cleanupPaymentContext,
+  type PaymentContext,
+} from './payment-handler.js';
 
 const logger = new Logger('execution-manager');
 
@@ -78,6 +86,13 @@ export interface ExecutionRequest {
     expected_subject_pattern?: string;
     wait_timeout_ms?: number;
   };
+  /** Numeric site ID (DB PK) for payment provider resolution */
+  numeric_site_id?: number;
+  /** Numeric site environment ID (DB PK) for payment provider resolution */
+  numeric_site_environment_id?: number;
+  /** Payment scenario ID — when set, the runner resolves the scenario from the DB,
+   *  builds the payment profile, and runs payment provider operations post-flow. */
+  payment_scenario_id?: number;
 }
 
 export interface RunRequest {
@@ -1005,15 +1020,35 @@ export class ExecutionManager {
 
     let browser: Browser | null = null;
     let runner: PersonaRunner | null = null;
+    let paymentCtx: PaymentContext | null = null;
 
     try {
       const persona = lookupPersona(ex.persona_id);
       browser = await getBrowser(ex.browser);
-      const executionContext: ExecutionContext = {
+
+      // Phase 17: Resolve payment context (provider + scenario) when
+      // payment_scenario_id is present on the execution request.
+      // Gracefully returns null for non-payment runs.
+      paymentCtx = await resolvePaymentContext(ex, this._correlationId);
+
+      let executionContext: ExecutionContext = {
         baseUrl: ex.base_url,
         testEmail: ex.email_validation?.test_email,
         correlationToken: ex.email_validation?.correlation_token,
       };
+
+      // Phase 17: Enrich the execution context with payment profile and
+      // scenario metadata so checkout flows fill the correct card data
+      // and adjust assertions based on expected result.
+      if (paymentCtx) {
+        executionContext = enrichExecutionContext(executionContext, paymentCtx);
+        logger.info(
+          `Execution ${ex.execution_id}: payment context resolved — provider="${paymentCtx.provider.name}" scenario="${paymentCtx.scenario.name}" expected="${paymentCtx.scenario.expectedResult}"`,
+          undefined,
+          this._correlationId,
+        );
+      }
+
       runner = new PersonaRunner(browser, persona, executionContext);
       await runner.setup();
 
@@ -1038,6 +1073,56 @@ export class ExecutionManager {
 
       if (result.passed) {
         await sendEmailValidationRequest(ex, this._correlationId);
+      }
+
+      // Phase 17: Run payment provider operations post-flow when a payment
+      // context was resolved and the flow actually executed (not aborted/skipped).
+      // Payment operations run after the browser flow so we can capture UI
+      // confirmation text for multi-source verification.
+      if (
+        paymentCtx &&
+        result.status !== 'aborted' &&
+        result.status !== 'skipped_by_approval'
+      ) {
+        try {
+          // Extract UI confirmation text from the page if still available
+          let uiConfirmationText: string | undefined;
+          try {
+            uiConfirmationText = await runner.page.textContent('body') ?? undefined;
+          } catch {
+            // Page may have been navigated away or closed — non-fatal
+          }
+
+          const opResult = await executePaymentOperation(
+            paymentCtx,
+            uiConfirmationText,
+            undefined, // email receipt content — would come from email validation
+            this._correlationId,
+          );
+
+          // Send payment transaction result as a separate callback type
+          const paymentPayload = buildPaymentTransactionPayload(ex, paymentCtx, opResult);
+          await postCallbackWithRetry(
+            ex.callback_url,
+            ex.callback_token,
+            JSON.stringify(paymentPayload),
+            ex.execution_id,
+            this._correlationId,
+            'Payment transaction callback',
+          );
+
+          logger.info(
+            `Execution ${ex.execution_id}: payment operation complete — status="${opResult.status}" txn="${opResult.providerTransactionId ?? 'none'}"`,
+            undefined,
+            this._correlationId,
+          );
+        } catch (paymentErr) {
+          logger.warn(
+            `Execution ${ex.execution_id}: payment post-step error (non-fatal): ${String(paymentErr)}`,
+            undefined,
+            this._correlationId,
+          );
+        }
       }
 
       // Phase 6: Run API tests as a post-step after browser flow completes.
@@ -1099,6 +1184,7 @@ export class ExecutionManager {
       );
     } finally {
       const cleanupErrors: unknown[] = [];
+      try { await cleanupPaymentContext(paymentCtx, this._correlationId); } catch (e) { cleanupErrors.push(e); }
       try { await runner?.teardown(); } catch (e) { cleanupErrors.push(e); }
       try { await browser?.close(); } catch (e) { cleanupErrors.push(e); }
       this.releaseSlot();
