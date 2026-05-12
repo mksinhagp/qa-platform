@@ -146,7 +146,7 @@ export async function batchUpsertCapabilities(data: {
   capabilities: Array<{ key: string; enabled: boolean }>;
 }): Promise<Result<{ count: number }>> {
   try {
-    await requireOperator();
+    const authContext = await requireOperator();
     const keys = data.capabilities.map(c => c.key);
     const flags = data.capabilities.map(c => c.enabled);
 
@@ -154,7 +154,7 @@ export async function batchUpsertCapabilities(data: {
       i_site_id: data.site_id,
       i_capability_keys: keys,
       i_enabled_flags: flags,
-      i_created_by: 'system',
+      i_created_by: authContext.operatorId.toString(),
     });
     const count = result.length > 0 ? (result[0] as Record<string, unknown>).o_upserted_count as number : 0;
     return { success: true, count };
