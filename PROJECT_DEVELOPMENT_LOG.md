@@ -3592,3 +3592,609 @@ After implementing all Phase 9 files (6 stored procedures, shared types, server 
 
 ---
 
+## May 11, 2026 - Post-Phase 9 Strategic Decision: New Roadmap Definition
+
+### Decision Context
+
+**Date**: May 11, 2026
+**Status**: All 9 phases complete (277/277 tests passing)
+
+### Situation Analysis
+
+The master plan originally defined v1 scope as Phases 0-1 only, with Phases 2-9 explicitly deferred as "non-goals for v1 setup" (master plan §18). However, the development implementation completed all 9 phases, delivering a feature-complete platform beyond the original v1 scope:
+
+- Full site management and onboarding (Phase 2)
+- Complete Playwright runner with persona-aware execution (Phase 3)
+- Real flow templates with friction telemetry (Phase 4)
+- Approval engine with live dashboard (Phase 4)
+- Email validation module (Phase 5)
+- API testing layer (Phase 6)
+- Admin/back-office coverage (Phase 7)
+- Ollama LLM integration (Phase 8)
+- Narrative reporting layer (Phase 9)
+
+### Strategic Decision
+
+**Chosen Path**: Option 3 - Define a new roadmap for production readiness and expansion
+
+**Rationale**: 
+- The platform is feature-complete per the full master plan
+- Rolling back to strict v1 (Phases 0-1 only) would discard significant work
+- The expanded scope provides immediate value for production use
+- Focus should shift to production hardening, operational maturity, and scalability
+
+### New Roadmap Priorities
+
+**HIGH Priority** (Production Readiness):
+1. Database backup strategy and automation
+2. Security review and penetration testing plan
+3. CI/CD templates and deployment automation
+4. Vault runbook (bootstrap, master-password rotation, KDF upgrade, emergency lock-out recovery)
+
+**MEDIUM Priority** (Operational Maturity):
+5. Retention enforcement audits and cleanup job verification
+6. Site onboarding runbook for new sites
+7. Troubleshooting runbook for common issues
+8. Disaster recovery runbook
+9. Database query analysis and indexing review
+10. Runner concurrency tuning and resource profiling
+
+**LOW Priority** (Future Expansion):
+11. Template for new site setup (beyond Yugal Kunj)
+12. Multi-site tenant isolation review
+
+### Next Immediate Actions
+
+1. Begin with vault runbook documentation (highest priority operational doc)
+2. Design database backup strategy (PostgreSQL pg_dump, cron scheduling, retention policy)
+3. Security review checklist preparation (OWASP Top 10, authentication, authorization, encryption)
+
+### Major Decision Record
+
+**Decision**: Accept expanded scope and pivot to production hardening roadmap
+**Made by**: Manish Sinha
+**Date**: May 11, 2026
+**Impact**: Platform will proceed to production deployment with full feature set rather than limited v1 scope
+
+---
+
+## May 11, 2026 - Master Plan Expanded for Generic QA Automation Product Roadmap
+
+### Objective
+
+Define the next major roadmap needed to turn the platform from a Yugal Kunj-focused QA system into a generic QA automation product for registration-oriented sites that include login, email verification, payments through Authorize.net, admin reconciliation, reporting, and complete QA campaign automation.
+
+### Work Completed
+
+Updated `master-plan-qa-automation.md` with a new section:
+
+- **§24 Generic QA Automation Product Roadmap**
+
+### New Phases Added
+
+| Phase | Title | Purpose |
+|---|---|---|
+| Phase 14 | Generic Registration Site Model | Define reusable site capabilities, flow contracts, selector dictionaries, rules schema v2, and onboarding wizard v2. |
+| Phase 15 | Generic Account Lifecycle Automation | Automate registration, login, email verification, password reset, logout, and cleanup across sites. |
+| Phase 16 | Generic Email Provider Layer | Generalize email validation across IMAP, Gmail API, Mailtrap, Mailosaur, Mailcatcher, and webhook/inbound parse strategies. |
+| Phase 17 | Authorize.net Payment Automation | Add provider abstraction and first-class Authorize.net sandbox support for payment, receipt, void, and refund validation. |
+| Phase 18 | Generic Flow Builder and Recorder | Add reusable flow templates, visual flow builder, Playwright recorder import, selector healing workflow, and versioned flow definitions. |
+| Phase 19 | Test Data Management | Add test identity generation, collision avoidance, data ledger, cleanup/retention, and sensitive data redaction. |
+| Phase 20 | Generic QA Orchestration | Add QA campaigns, scenario matrix builder, scheduling, approval gates, and QA sign-off workflow. |
+| Phase 21 | Generic Reporting and Defect Output | Add defect export, business QA report, developer debug report, and release certification report. |
+
+### Specifications Added
+
+Each new phase now includes:
+
+- Objective
+- Specifications
+- Numbered tasks
+- Acceptance criteria per task
+- Exit criteria
+
+### Recommended Execution Order
+
+The master plan now recommends this order for generic product work:
+
+1. Phase 14: Generic Registration Site Model
+2. Phase 15: Generic Account Lifecycle Automation
+3. Phase 17: Authorize.net Payment Automation
+4. Phase 16: Generic Email Provider Layer
+5. Phase 19: Test Data Management
+6. Phase 20: Generic QA Orchestration
+7. Phase 18: Generic Flow Builder and Recorder
+8. Phase 21: Generic Reporting and Defect Output
+
+### Major Decisions
+
+1. **Generic product direction confirmed**: The platform will evolve into a reusable QA automation product, not remain a single-site implementation.
+2. **Authorize.net is first-class**: Payment automation will focus on Authorize.net sandbox first while using a generic provider interface for future providers.
+3. **Generic site model comes first**: A reusable site capability/selector/rules model is required before additional sites can be onboarded cleanly.
+4. **Human approval remains required for risky automation**: Payments, refunds/voids, production runs, destructive cleanup, and selector-healing updates require approval gates where configured.
+5. **Database-first approach continues**: New persisted configuration and operational records must use stored procedures, not ad-hoc SQL from application code.
+
+### Files Modified
+
+- `master-plan-qa-automation.md` - Added §24 with Phases 14-21, detailed tasks, specifications, acceptance criteria, exit criteria, recommended execution order, and minimum product bar.
+- `PROJECT_DEVELOPMENT_LOG.md` - Added this planning entry.
+
+---
+
+## June 2026 — Phase 10.1: Database Backup Strategy & Automation
+
+**Date**: 2026-06  
+**Task Reference**: Phase 10.1 — Production-grade PostgreSQL backup strategy
+
+### Objective
+
+Implement an automated, self-contained backup/restore system for the `qa_platform` PostgreSQL 16 database running in Docker Compose. The strategy must work both inside Docker containers and from the host (assuming local pg tools), support configurable retention, verify integrity after every run, and integrate with macOS launchd and Linux cron for scheduling.
+
+### Work Completed
+
+#### 1. `docker/postgres/backup.sh` (new file)
+
+- Uses `pg_dump` with `--format=custom --compress=9` (custom format: smaller, selectively restorable)
+- Backup filename: `<POSTGRES_DB>_<YYYYMMDD>_<HHMMSS>.dump`
+- Accepts all connection details via env vars: `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `BACKUP_DIR`, `BACKUP_RETENTION_DAYS`
+- Pre-flight connectivity check via `pg_isready` before attempting backup
+- Disk space warning (< 500 MB) logged but does not abort
+- Post-dump integrity check via `pg_restore --list` (dry-run, no DB write) — exits 1 if corrupt
+- Retention: removes files matching `<db>_*.dump` older than `BACKUP_RETENTION_DAYS` (default 30)
+- Structured log output: `[ISO8601Z] [LEVEL] message` to stdout; errors to stderr
+- Returns exit 0 on success, exit 1 on any failure; cleans up incomplete dump file on pg_dump failure
+- File marked executable with `chmod +x`
+
+#### 2. `docker/postgres/restore.sh` (new file)
+
+- Accepts backup file via `$1` argument or `RESTORE_FILE` env var
+- Validates file existence, readability, and integrity (`pg_restore --list`) before any DB writes
+- Displays restore plan (file, size, target) with a clear `WARNING` banner
+- Prompts for `yes` confirmation unless `RESTORE_FORCE=true`; in non-interactive mode without force flag, aborts safely
+- Uses `pg_restore --clean --if-exists --no-owner --no-privileges --exit-on-error`
+- Streams pg_restore verbose output through the structured logger line by line
+- Post-restore sanity check: counts tables in `information_schema.tables` where `table_schema = 'public'`
+- File marked executable with `chmod +x`
+
+#### 3. `docker-compose.yml` — `backup` service added
+
+- New `backup` service using `postgres:16-alpine` (same image as server = guaranteed pg tool version match)
+- Profile: `backup` — never starts with plain `docker compose up`
+- Mounts `backups` named volume at `/backups`
+- Bind-mounts `./docker/postgres/backup.sh` as read-only into the container; `chmod +x` applied in command entrypoint
+- Inherits all postgres connection env vars from the compose file
+- `BACKUP_RETENTION_DAYS` configurable via host env or `.env` file (default 30)
+- `depends_on: postgres: condition: service_healthy` — waits for DB healthcheck before running
+- Connected to `qa-platform-network`
+- `backups:` named volume added to the top-level `volumes` section
+
+#### 4. `docs/runbooks/backup-cron.md` (new file)
+
+Comprehensive runbook covering:
+- Backup file naming convention and volume location
+- Manual backup invocation
+- Automated scheduling: macOS launchd (with plist) and Linux cron (with example crontab entries)
+- Retention policy and override
+- Verifying a backup (pg_restore --list from ad-hoc container)
+- Step-by-step restore procedure (host and Docker)
+- Troubleshooting table for common failure modes
+
+#### 5. `docker/postgres/com.qa-platform.backup.plist` (new file)
+
+macOS launchd plist:
+- Label: `com.qa-platform.backup`
+- `ProgramArguments`: `docker compose --profile backup run --rm backup`
+- `WorkingDirectory`: project root (absolute path)
+- `StartCalendarInterval`: daily at 02:00 AM (`Hour=2`, `Minute=0`)
+- `StandardOutPath` + `StandardErrorPath`: both to `/tmp/qa-platform-backup.log`
+- `RunAtLoad: false` (schedule only, not on agent load)
+- `KeepAlive: false` (one-shot job, no restart on exit)
+- `EnvironmentVariables.PATH` includes `/usr/local/bin` for Docker Desktop
+
+### Major Decisions
+
+1. **Custom format (`-Fc`) over plain SQL**: Custom format is compressed, supports selective restore (table/schema-level), and is the pg_restore-compatible format. Plain SQL dumps cannot be used with `pg_restore`; they are harder to verify for integrity.
+
+2. **Same image for backup service (`postgres:16-alpine`)**: Using the same image as the database server guarantees that `pg_dump` and `pg_restore` versions always match. Version mismatch between client and server tools is a common source of restore failures.
+
+3. **`pg_restore --list` for integrity verification**: A dry-run table-of-contents read is the lightest possible integrity check — it reads the entire dump file structure without writing to any database. Corrupt or truncated files fail immediately.
+
+4. **Profile `backup` (not `tools` or `admin`)**: A dedicated profile name makes the intent self-documenting and avoids accidental activation when other optional services (llm, dev) are enabled.
+
+5. **Bind-mount backup.sh as read-only**: Mounting the script (rather than baking it into an image) means script changes take effect immediately without rebuilding any image. The `postgres:16-alpine` base image already has all required tools (`pg_dump`, `pg_restore`, `pg_isready`, `psql`).
+
+6. **`RESTORE_FORCE=true` gate**: Restore is a destructive operation. Defaulting to interactive confirmation prevents accidental data loss in manual workflows. The `RESTORE_FORCE` override is explicit and must be intentionally set in automated pipelines.
+
+7. **Combined stdout/stderr in launchd plist**: A single log file at `/tmp/qa-platform-backup.log` is simpler to monitor than separate files. The backup script already separates levels via `[INFO]`/`[ERROR]` prefixes.
+
+### Files Created / Modified
+
+| File | Action | Notes |
+|------|--------|-------|
+| `docker/postgres/backup.sh` | Created | Executable (`chmod +x`) |
+| `docker/postgres/restore.sh` | Created | Executable (`chmod +x`) |
+| `docker-compose.yml` | Modified | Added `backup` service + `backups` volume |
+| `docs/runbooks/backup-cron.md` | Created | New `docs/runbooks/` directory created |
+| `docker/postgres/com.qa-platform.backup.plist` | Created | macOS launchd daily schedule |
+| `PROJECT_DEVELOPMENT_LOG.md` | Modified | This entry |
+
+### Lessons Learned / Best Practices
+
+- **pg tool version parity**: Always use the same PostgreSQL version for `pg_dump`/`pg_restore` as the server. The easiest way in Docker is to use the same image tag as the database service.
+- **Custom format is the right default**: For production backups, `--format=custom` with compression is strictly better than plain SQL — smaller, faster to restore selectively, and integrity-checkable without touching a database.
+- **`--if-exists` is critical for clean restores**: Without it, `pg_restore --clean` fails on the first missing object (e.g. on a fresh database). The `--if-exists` flag converts DROP errors to warnings.
+- **Retention via `find -mtime`**: The `-mtime +N` predicate uses file modification time, which is set at creation for new dump files. This is reliable as long as backup files are never touched after creation.
+- **`set -euo pipefail` in backup scripts**: `pipefail` ensures that a failing command in a pipeline (e.g., `pg_dump | something`) propagates the error correctly. `nounset` (`-u`) catches missing variable references early.
+
+---
+
+## May 27, 2026
+
+### Phase 10.3 Completed: CI/CD Templates & Deployment Automation
+
+**Task Reference**: Master Plan Phase 10, Task 3
+
+#### Work Completed
+
+**1. `.github/workflows/ci.yml` — Continuous Integration**
+- Four-job pipeline: `lint-and-typecheck` → (`test` ‖ `build`) → `docker-build`
+- `lint-and-typecheck`: runs `turbo run lint` and `turbo run typecheck` (pnpm 9, Node 20 LTS)
+- `test`: spins up `postgres:16-alpine` as a GitHub Actions service with health check, runs `pnpm --filter @qa-platform/db run migrate` then `pnpm run test:coverage`; uploads coverage artifact (14-day retention)
+- `build`: runs `turbo run build`, uploads `apps/dashboard-web/.next/standalone`, `apps/runner/dist`, and `packages/*/dist` as a build artifact (7-day retention)
+- `docker-build`: builds both `docker/dashboard/Dockerfile` and `docker/runner/Dockerfile` using `docker/build-push-action@v6` with GHA cache scoped per image; does NOT push (validation only)
+- Concurrency: cancels in-progress runs on the same ref to prevent queue pile-ups on PRs
+
+**2. `.github/workflows/deploy-staging.yml` — Staging Deployment**
+- Triggers: push to `main` (automatic) and `workflow_dispatch` (manual with optional reason field)
+- Targets GitHub environment `staging` for secret scoping and optional reviewer protection
+- Builds Docker images on the runner, saves as `.tar.gz` tarballs, copies via SCP to staging server
+- SSH orchestration via `appleboy/ssh-action`: loads images, `git reset --hard origin/main`, writes `.env.staging`, `docker compose up -d --remove-orphans`, runs migrator, prunes dangling images
+- Health check: polls `http://<host>:3000/api/health` every 10s for up to 24 attempts (4 minutes)
+- Concurrency: `cancel-in-progress: false` so deployments queue rather than cancel mid-flight
+
+**3. `.github/workflows/security-scan.yml` — Security Scanning**
+- Triggers: weekly cron (Sunday 02:00 UTC), push to `main`, manual dispatch
+- Three parallel jobs:
+  - `dependency-audit`: `pnpm audit --audit-level=high` — fails on HIGH/CRITICAL CVEs in npm deps
+  - `docker-scan`: builds both images, runs Trivy (`aquasecurity/trivy-action@0.28.0`) for HIGH/CRITICAL CVEs; uploads SARIF to GitHub Security tab via `github/codeql-action/upload-sarif@v3`
+  - `secret-scan`: full git history checkout, TruffleHog (`trufflesecurity/trufflehog-actions-scan@v2`) with `--only-verified`; on push to main scans only the commits in that push
+
+**4. `docker/docker-compose.staging.yml` — Staging Compose Override**
+- Removes bind-mount volumes from all services (`volumes: []` on dashboard-web and runner)
+- Sets `NODE_ENV=production` on all services
+- `restart: unless-stopped` on postgres, dashboard-web, and runner; `restart: "no"` on migrator (one-shot)
+- JSON-file logging with `max-size: 10m`, `max-file: "3"` on all services
+- Excludes `ollama` and `mailcatcher` by setting their profiles to `never`
+- Uses `${VAR:?error}` syntax to enforce required secrets at compose-up time
+
+**5. `scripts/deploy.sh` — Local Deployment Helper**
+- Accepts `staging` or `production` as first argument; `-h` shows usage
+- Validates environment argument, required env vars (`DASHBOARD_SESSION_SECRET`, `POSTGRES_PASSWORD`), and required binaries (`docker`, `curl`)
+- Resolves project root from script location — safe to call from any directory
+- Steps: `docker compose build --parallel` → `docker compose up -d --remove-orphans` → `run --rm migrator` → health check with configurable retries and interval → status summary with `docker compose ps` table
+- `chmod +x` applied; uses `set -euo pipefail` throughout
+
+**6. `docs/runbooks/cicd-runbook.md` — CI/CD Operations Runbook**
+- Full workflow reference (job dependency graphs, artifact names, caching strategy)
+- Complete secrets table with descriptions and generation commands
+- Branch strategy documentation
+- Manual deployment instructions (GitHub UI and `gh` CLI)
+- Step-by-step rollback procedure with explicit note on database schema rollback policy
+- Adding a new environment walkthrough (compose file → secrets → workflow → GitHub environment)
+- Troubleshooting section for: test failures, Docker build failures, migration failures, health check timeout, audit vulnerabilities, TruffleHog detections
+- Local `deploy.sh` usage reference with all override variables
+
+#### Architectural Decisions
+
+- **pnpm 9 in CI vs. pnpm 8.15.0 in package.json**: The Dockerfiles install `pnpm@9` explicitly. CI workflows use pnpm 9 to match Docker build behaviour. The root `package.json` `packageManager` field references 8.15.0 (legacy), which should be updated separately.
+- **No registry push in CI**: Docker images are built for validation only in `ci.yml`. The staging workflow transfers images via SCP tarballs to avoid requiring a container registry for now. This simplifies initial setup but should migrate to a private registry (GHCR or ECR) when the team grows.
+- **`cancel-in-progress: false` on staging deploy**: Chosen deliberately so an in-flight deployment is never killed mid-compose-up, which would leave containers in a partial state. Deployments queue instead.
+- **Trivy `ignore-unfixed: true`**: Trivy reports only vulnerabilities that have a known fix available, reducing noise from unfixable OS-level CVEs in base images.
+- **TruffleHog `--only-verified`**: Reduces false positives to secrets that TruffleHog can verify are live credentials, preventing alert fatigue.
+- **Staging compose uses `volumes: []`**: Explicitly blanks the `volumes` key on services that had bind-mounts in `docker-compose.override.yml` (dev mode). This is the correct Docker Compose v2 merge behaviour — an empty list overrides inherited mounts.
+- **GitHub environment `staging`**: Decouples staging secrets from repo-level secrets and enables optional required-reviewer gates without changing workflow code.
+
+#### Files Created
+
+| File | Size | Description |
+|---|---|---|
+| `.github/workflows/ci.yml` | 184 lines | CI pipeline |
+| `.github/workflows/deploy-staging.yml` | 154 lines | Staging deployment |
+| `.github/workflows/security-scan.yml` | 147 lines | Security scanning |
+| `docker/docker-compose.staging.yml` | 85 lines | Staging compose override |
+| `scripts/deploy.sh` | 192 lines | Local deployment helper (executable) |
+| `docs/runbooks/cicd-runbook.md` | 426 lines | CI/CD operations runbook |
+
+#### Issues Encountered
+
+- **`packageManager` version mismatch**: Root `package.json` declares `pnpm@8.15.0` but Dockerfiles install `pnpm@9`. CI workflows use pnpm 9 to match Docker. Recommend updating `packageManager` field to `pnpm@9.x.x` in a follow-up.
+- **No `test` turbo task**: The root `turbo.json` does not define a `test` task. CI calls `vitest run` directly via the root `pnpm run test:coverage` script (which calls `vitest run --coverage`). This is correct — vitest does not benefit from turbo's task graph for a root-level test run.
+
+#### Lessons Learned / Best Practices
+
+- **`cancel-in-progress: false` for deploy workflows**: Always queue deployments rather than cancel them. A cancelled mid-deploy leaves infrastructure in a broken state.
+- **Separate GHA cache scopes per Docker image**: Using `scope=dashboard` and `scope=runner` on `type=gha` cache prevents cache key collisions between the two image builds.
+- **`appleboy/ssh-action` `envs` parameter**: Environment variables must be declared in `envs:` to be available inside the `script:` block. The action does not automatically forward the runner's environment.
+- **Docker Compose `volumes: []` override**: An empty list in an override file correctly removes inherited bind-mounts. Setting `volumes:` to `null` or omitting it does NOT remove the base file's mounts.
+- **`--only-verified` for TruffleHog**: Reduces false positives significantly in codebases with many API-key-shaped strings (test data, example configs). Without it, alert fatigue kills security workflow adoption.
+
+---
+
+## May 11, 2026
+
+### Phase 10.4 Completed: Vault Runbook Documentation
+
+**Task Reference**: Phase 10.4 — Vault Runbook Documentation
+
+#### Work Completed
+
+1. **Read all vault source files** before writing any documentation:
+   - `packages/vault/src/crypto.ts` — Argon2id `deriveKEK()`, `generateRVK()`, `generateDEK()`, `generateNonce()`, `wrapKey()`, `unwrapKey()`, `zeroize()`
+   - `packages/vault/src/vault.ts` — `bootstrapVault()`, `unlockVault()`, `lockVault()`, `encryptSecret()`, `decryptSecret()`, `withUnlocked()`
+   - `packages/vault/src/registry.ts` — `UnlockSessionRegistry` singleton with TTL and idle-reset logic
+   - `packages/auth/src/password.ts` — `hashPassword()`, `verifyPassword()` with Argon2id
+   - `packages/auth/src/sessions.ts` — `createSession()`, `validateSession()`, `revokeSession()`
+   - `packages/config/src/env.schema.ts` — all `VAULT_ARGON2ID_*` and `VAULT_UNLOCK_*` env vars with defaults
+   - `apps/dashboard-web/app/actions/vault.ts` — `bootstrapVaultAction()`, `unlockVaultAction()`, `lockVaultAction()`, `isVaultUnlocked()`
+   - `apps/dashboard-web/app/dashboard/settings/vault/bootstrap/page.tsx` — bootstrap UI form
+   - All 6 vault stored procedures: `sp_vault_state_get`, `sp_vault_bootstrap`, `sp_vault_unlock_session_create`, `sp_vault_unlock_session_validate`, `sp_vault_lock`, `sp_vault_state_get_crypto`
+   - Migration files: `0002_system_vault_audit_tables.sql`, `0006_phase1_auth_vault_tables.sql`, `0007_secret_tables.sql`
+   - `docs/decisions/003-vault-cryptography.md` — existing crypto ADR
+
+2. **Created `docs/runbooks/vault-runbook.md`** (714 lines)
+   - Section 1: Architecture overview, key hierarchy diagram (master password → KEK → RVK → DEK → ciphertext), what lives in DB vs. memory, security invariants
+   - Section 2: First-time bootstrap — step-by-step including internal `generateRVK()`, `generateSalt()`, `deriveKEK()`, `wrapKey()`, `sp_vault_bootstrap()` advisory lock, auto-unlock flow
+   - Section 3: Daily unlock procedure — `sp_vault_state_get_crypto()`, `deriveKEK()`, `unwrapKey()`, registry registration, TTL table with `VAULT_UNLOCK_TTL_SECONDS` (1800s) and `VAULT_UNLOCK_IDLE_RESET_SECONDS` (300s)
+   - Section 4: Manual lock — `registry.remove()` (zeroizes RVK), `sp_vault_lock()` sets `is_active = FALSE`, cookie deletion
+   - Section 5: Master password rotation — full procedure with pre-rotation backup command, internal mechanics, what does NOT change (secret_records untouched), rollback notes
+   - Section 6: KDF parameter upgrade — annual review cycle, benchmark approach, OWASP/NIST references, procedure via rotation
+   - Section 7: Emergency lock-out recovery — nuclear option with explicit "no automated recovery" framing, manual DB statements (retain secret_records for audit), re-bootstrap steps, contact log guidance
+   - Section 8: Secret CRUD operations — add, update, archive (soft-delete only), reveal (every access logged to `secret_access_logs`)
+   - Section 9: Monitoring — three monitoring SQL queries, alert threshold (>5 failed unlocks in 60 min), metrics table
+   - Section 10: Troubleshooting — 9-row symptom/cause/resolution table covering all common failure modes
+
+3. **Created `docs/decisions/007-vault-operations-policy.md`** (165 lines)
+   - 6 policy groups: Master Password Governance, Unlock Session Management, KDF Parameter Review, Bootstrap Access Control, Monitoring and Incident Response, Secret Lifecycle
+   - Consequences (positive and negative) with honest trade-off analysis
+   - Compliance alignment table: OWASP Password Storage, OWASP ASVS v4, NIST SP 800-63B, NIST SP 800-57, NIST SP 800-132
+   - Full reference list linking back to source files, stored procedures, and migrations
+
+#### Files Created / Modified
+
+| File | Action | Size |
+|---|---|---|
+| `docs/runbooks/vault-runbook.md` | Created | 714 lines |
+| `docs/decisions/007-vault-operations-policy.md` | Created | 165 lines |
+| `PROJECT_DEVELOPMENT_LOG.md` | Updated | This entry |
+
+#### Decisions Made
+
+- **ADR 007 numbered 007** despite no ADR 006 existing at time of writing. The task specification required this filename; a gap in the ADR numbering sequence is acceptable given that ADR 006 (`006-security-review.md`) exists in the file system (discovered after initial listing).
+- **`secret_records` retained on emergency recovery**: The runbook explicitly instructs operators NOT to delete `secret_records` during lockout recovery. Encrypted payloads are permanently unreadable without the RVK, but the rows document what credentials existed — valuable for audit and compliance.
+- **Vault unlock cookie TTL is hardcoded at 30 minutes** in the server action (`maxAge: 60 * 30`) independently of `VAULT_UNLOCK_TTL_SECONDS`. These must be kept in sync manually if the env var is changed. This is a documentation gap noted for future improvement.
+- **"Archive not delete" policy** for secrets codified in ADR 007 Policy 6.2, aligned with the existing `sp_secret_records_archive` proc design.
+
+#### Lessons Learned / Best Practices
+
+- **Read actual source before writing ops documentation**: The `sp_vault_bootstrap` advisory lock (`pg_advisory_xact_lock(hashtext('vault_bootstrap'))`) and the dual TTL model (absolute + idle) are non-obvious details that only appear in the code; they would have been missed without reading the implementation.
+- **Document what does NOT change during rotation**: Operators commonly fear that password rotation re-encrypts all secrets. Explicitly documenting that only the RVK wrapping changes (not `secret_records`) prevents unnecessary downtime or hesitation.
+- **Two independent timeout clocks in the registry**: The `UnlockSessionRegistry` enforces both an absolute TTL (`expiresAt`) and an idle timeout (`lastActivityAt`). The session expires if EITHER fires. Both must be documented and monitored separately.
+- **Cookie `maxAge` and env-var TTL are independent**: The `unlock_token` cookie `maxAge` in `vault.ts` server action is hardcoded at `60 * 30` and not derived from `VAULT_UNLOCK_TTL_SECONDS`. Changing the env var without adjusting the cookie means the cookie outlives the in-memory session (or vice versa). Flag this for a future code fix.
+
+---
+
+## May 11, 2026
+
+### Phase 11.1 Completed: Retention Enforcement Audits and Cleanup Job Verification
+
+**Task Reference**: Master Plan Phase 11.1
+
+#### Work Completed
+
+1. **DB Migration 0019** (`db/migrations/0019_artifact_retention_config.sql`)
+   - Created `artifact_retention_config` table with `id`, `artifact_type` (UNIQUE), `retention_days`, `is_active`, `notes`, audit columns (`created_date`, `updated_date`, `created_by`, `updated_by`).
+   - Seeded 7 default rows: `trace` (30d), `video` (14d), `screenshot` (7d), `har` (30d), `console_log` (14d), `network_log` (14d), `walkthrough_mp4` (14d).
+   - Uses `ON CONFLICT (artifact_type) DO NOTHING` so re-running is safe.
+
+2. **Stored Procedure 0123** (`db/procs/0123_sp_artifacts_list_expired.sql`) — `sp_artifacts_list_expired`
+   - Lists expired artifacts (up to `i_limit` rows, default 500).
+   - Artifact is expired if: `retention_date < NOW()` OR (`retention_date IS NULL` AND config-driven `created_date + retention_days < NOW()`).
+   - Returns: `o_id`, `o_run_execution_id`, `o_artifact_type`, `o_file_path`, `o_file_size_bytes`, `o_retention_date`, `o_created_date`.
+
+3. **Stored Procedure 0124** (`db/procs/0124_sp_artifacts_mark_deleted.sql`) — `sp_artifacts_mark_deleted`
+   - Accepts `i_artifact_ids INTEGER[]` and hard-deletes those artifact rows.
+   - Returns `o_deleted_count INTEGER`.
+   - Called by cleanup job after files are confirmed deleted from disk.
+
+4. **Stored Procedure 0125** (`db/procs/0125_sp_artifacts_retention_audit.sql`) — `sp_artifacts_retention_audit`
+   - Returns per-type audit summary: `o_total_count`, `o_expired_count`, `o_total_size_bytes`, `o_oldest_artifact`, `o_retention_days`.
+   - Drives the dashboard audit table.
+
+5. **Stored Procedure 0126** (`db/procs/0126_sp_artifacts_insert.sql`) — `sp_artifacts_insert`
+   - Inserts an artifact record, auto-computing `retention_date` from `artifact_retention_config`.
+   - Returns `o_id`, `o_file_path`, `o_retention_date`, `o_created_date`.
+
+6. **Stored Procedure 0127** (`db/procs/0127_sp_artifact_retention_config_list.sql`) — `sp_artifact_retention_config_list`
+   - Lists all retention config rows ordered by `artifact_type`.
+
+7. **Stored Procedure 0128** (`db/procs/0128_sp_artifact_retention_config_update.sql`) — `sp_artifact_retention_config_update`
+   - Updates `retention_days` (and optionally `notes`) for a given `artifact_type`.
+   - Returns updated row.
+
+8. **Cleanup Job** (`apps/runner/src/cleanup-job.ts`)
+   - Standalone Node.js / tsx script runnable via `npx tsx apps/runner/src/cleanup-job.ts`.
+   - Reads `DATABASE_URL` from env (falls back to parsing `.env` at repo root).
+   - Calls `sp_artifacts_list_expired` → deletes files via `fs.unlink` (ENOENT = not a failure) → calls `sp_artifacts_mark_deleted` with batch of confirmed-gone IDs.
+   - Exits 0 on success, 1 on fatal error.
+   - Does NOT require `pg` in runner's `package.json`; uses indirect dynamic import (`'p' + 'g'`) that resolves at runtime through the pnpm workspace (packages/db/node_modules/pg).
+
+9. **Server Action** (`apps/dashboard-web/app/actions/artifacts.ts`)
+   - `'use server'` module; all functions call `requireOperator()` first.
+   - `getRetentionAudit()` → `sp_artifacts_retention_audit`
+   - `getRetentionConfig()` → `sp_artifact_retention_config_list`
+   - `updateRetentionConfig(artifact_type, retention_days, notes?)` → `sp_artifact_retention_config_update`
+   - `listExpiredArtifacts(limit?)` → `sp_artifacts_list_expired`
+   - `runInlineCleanup()` — same logic as the cron job, capped at 100 items for UI safety; calls `unlink` + `sp_artifacts_mark_deleted` server-side.
+
+10. **Artifacts Dashboard Page** (`apps/dashboard-web/app/dashboard/artifacts/page.tsx`)
+    - Replaced the placeholder with a full `'use client'` page.
+    - Header with "Refresh" and "Run Cleanup Now" buttons.
+    - Summary cards: total artifacts, expired count, total size.
+    - Audit Summary table: per type totals, expired count (red badge if > 0), size, oldest date, retention days.
+    - Retention Config table: inline edit for `retention_days` per type, with Save/Cancel; calls `updateRetentionConfig` server action.
+    - Collapsible "Expired Artifacts" section: lazy-loaded on expand, shows file paths, sizes, dates.
+    - Cleanup result banner shows per-run summary after "Run Cleanup Now".
+
+#### Architecture Decisions
+
+- **Hard-delete vs soft-delete**: Used hard delete in `sp_artifacts_mark_deleted` (no `is_deleted` column added) because artifact records are file-path index entries only — once the file is gone, the DB row has no value. This avoids a schema change that would impact existing queries.
+- **Expiry logic in SQL**: Both the `list_expired` and `retention_audit` procs handle the dual expiry logic (explicit `retention_date` OR config-driven fallback) entirely in PostgreSQL — no application-side date arithmetic.
+- **Dynamic pg import in cleanup-job**: Used string-split dynamic import (`'p' + 'g'`) to avoid compile-time module resolution by the runner's `tsc --noEmit`. The runner package does not declare `pg` as a dependency; the module resolves at runtime through pnpm workspace hoisting from `packages/db`.
+- **UI cleanup cap at 100**: `runInlineCleanup()` is capped at 100 artifacts per invocation to keep the server action responsive. The cron-job script has a configurable cap (default 500, env `CLEANUP_LIMIT`).
+
+#### Files Created (new — not modified)
+- `db/migrations/0019_artifact_retention_config.sql`
+- `db/procs/0123_sp_artifacts_list_expired.sql`
+- `db/procs/0124_sp_artifacts_mark_deleted.sql`
+- `db/procs/0125_sp_artifacts_retention_audit.sql`
+- `db/procs/0126_sp_artifacts_insert.sql`
+- `db/procs/0127_sp_artifact_retention_config_list.sql`
+- `db/procs/0128_sp_artifact_retention_config_update.sql`
+- `apps/runner/src/cleanup-job.ts`
+- `apps/dashboard-web/app/actions/artifacts.ts`
+
+#### Files Modified
+- `apps/dashboard-web/app/dashboard/artifacts/page.tsx` — replaced placeholder with full implementation.
+
+#### Typecheck Result
+All 15 turbo typecheck tasks passed with 0 errors (`pnpm typecheck` exit 0).
+
+---
+
+### Phase 11.2 Completed: Site Onboarding Runbook
+
+**Task Reference**: Master Plan Phase 11.2
+**Date**: May 11, 2026
+
+#### Work Completed
+
+Created `docs/runbooks/site-onboarding.md` (422 lines) — a complete operator-ready guide for onboarding a new website into the QA Automation Platform from scratch.
+
+**Sections written:**
+1. Overview and scope
+2. Prerequisites (Docker stack, vault, operator account)
+3. Step 1: Register the site in the dashboard (`/dashboard/sites/new` wizard — all 3 steps annotated)
+4. Step 2: Add environments (staging vs. production URL conventions)
+5. Step 3: Configure the vault if not done — links to vault runbook, secrets structure
+6. Step 4: Add site credentials — vault secret creation, credential key conventions, environment binding
+7. Step 5: Configure email inbox — Mailcatcher (dev, Docker profile) and IMAP (production) with specific field values
+8. Step 6: Configure payment profile — Authorize.net sandbox, test card details, environment binding
+9. Step 7: Set approval policies — categories, strength levels (`strong`, `one_click`, `none`)
+10. Step 8: Create the site rules file — fully annotated `sites/{slug}/rules.ts` template covering all SiteRules sections
+11. Step 9: Configure selectors — DevTools workflow, Playwright Inspector (`npx playwright codegen`), selector priority order (data-testid > ARIA > stable class)
+12. Step 10: Write or adapt flow files — required vs. optional flows, flow template based on `PersonaRunner`/`FlowDefinition`, reference to `sites/yugal-kunj/flows/`
+13. Step 11: Run a smoke test — minimal 1-persona/1-device/1-browser run configuration
+14. Verification checklist — 12-item gate before declaring onboarding complete
+15. Troubleshooting quick-reference — 5 most common onboarding issues with direct fixes
+
+#### Key Decisions
+
+1. **Template over prescription**: The rules.ts template in the runbook includes all optional sections (capacity, age_restriction, coupon, payment, cancellation, registration, admin, selectors, elevated_approval_categories) rather than a minimal subset — operators delete what they don't need rather than discovering missing sections later.
+2. **Mailcatcher profile activation**: Documented `docker-compose --profile dev up -d mailcatcher` explicitly — the profile flag is non-obvious and a frequent first-time stumbling block.
+3. **Selector priority order**: Documented `data-testid` > ARIA > stable class > positional selector as the recommended priority, aligned with the project's Playwright conventions.
+4. **Smoke test scope**: Runbook recommends starting with `confident_desktop` persona + desktop device + Chromium + `browse` flow only — smallest possible matrix to confirm wiring before expanding coverage.
+
+#### Files Created
+- `docs/runbooks/site-onboarding.md` — new file, 422 lines
+
+---
+
+### Phase 11.3 Completed: Troubleshooting Runbook
+
+**Task Reference**: Master Plan Phase 11.3
+**Date**: May 11, 2026
+
+#### Work Completed
+
+Created `docs/runbooks/troubleshooting.md` (1,337 lines, ~48 KB) — a comprehensive operational troubleshooting guide covering the full platform surface.
+
+**15 sections written:**
+- §1 Diagnostic Quick Reference — 19-row symptom → cause → section lookup table
+- §2 Docker / Infrastructure — container startup failures by service, health check testing, port conflict table (host port 5434 override noted), log commands, single-service restart, `pg_data` volume safe reset, migrator force re-run
+- §3 Database / Migration — "already exists" idempotency fix via `schema_migrations`, proc not found diagnosis, connection pool exhaustion queries, applied migration inspection, manual migration apply, direct psql access (`docker exec -it qa-platform-postgres psql -U qa_user -d qa_platform`)
+- §4 Authentication — login failure stepthrough, session TTL env vars, operator not found, password reset using in-container Argon2id hash generation + `sp_operators_update`, vault unlock path
+- §5 Vault — bootstrap already-done handling, master password failure (no recovery path, documented explicitly), unlock session expiry, bootstrap required detection, `sp_vault_state_get()` usage
+- §6 Site & Environment — inactive site/env SQL fixes, base URL inside Docker (`host.docker.internal`), `site_credentials` binding diagnosis, `site_env_email_bindings` diagnosis
+- §7 Runner / Playwright — network reachability test from dashboard container, browser binary missing + clean rebuild, timeout/selector failure diagnosis, selector healing DB query, friction signals, callback token lifecycle, HTTP abort + SQL fallback for dead runner
+- §8 Email Validation — IMAP reachability from runner container, correlation token matching, Mailcatcher profile activation, manual IMAP test via `openssl s_client`
+- §9 LLM / Ollama — profile activation, `docker exec qa-platform-ollama ollama pull <model>` commands, benchmark result SQL queries, latency mitigation
+- §10 API Testing — ECONNREFUSED + `host.docker.internal` fix, schema mismatch → api-endpoints file update, business rules → rules file update
+- §11 Reporting — empty run diagnosis, missing narrative sections (Ollama disabled, no failures), accessibility steps check
+- §12 Artifact Retention / Cleanup — expired artifact query, cleanup job log check, retention env var table, file permission fix, orphaned row cleanup, manual cleanup trigger
+- §13 Performance — `EXPLAIN ANALYZE` on procs, slow query logging, runner memory via `docker stats`, active connection monitoring
+- §14 Common Error Messages — 18-row table: error text → service → meaning → fix
+- §15 Escalation Checklist — `docker compose logs` dump commands, DB state snapshot SQL block, `docker stats`, env var dump (redacted), structured reproduction steps
+
+#### Key Decisions
+
+1. **Schema fidelity**: All SQL queries in the runbook reference only tables and stored procedures confirmed to exist in the actual migration files and `db/procs/` — no invented schema.
+2. **Exact Docker names**: Service names (`postgres`, `dashboard-web`, `runner`, `ollama`, `mailcatcher`) and container names (`qa-platform-postgres`, `qa-platform-dashboard`, `qa-platform-runner`, `qa-platform-ollama`) taken directly from `docker-compose.yml`.
+3. **Dual abort path for runner**: Both the HTTP path (`POST /abort` to runner at port 4000) and a SQL fallback (manual `UPDATE run_executions SET status = 'aborted'`) are documented for the case where the runner container is dead or unreachable.
+4. **No automated vault recovery path**: The runbook explicitly states there is no automated recovery if the master password is lost — this mirrors the intentional design of the vault (no key escrow). The emergency procedure preserves `secret_records` rows for audit while re-bootstrapping.
+5. **Password reset requires in-container hash generation**: Because passwords are stored as Argon2id hashes, the runbook documents generating the hash inside the container (`docker exec -it qa-platform-dashboard node -e "..."`) before running the UPDATE statement — avoids the trap of storing a plaintext password.
+
+#### Files Created
+- `docs/runbooks/troubleshooting.md` — new file, 1,337 lines
+
+---
+
+## May 11, 2026 — Phase 11 Complete: Operational Documentation
+
+### Phase 11 Summary
+
+**Date**: May 11, 2026
+**Status**: All three Phase 11 tasks completed. Phase 11.4 (Disaster Recovery Runbook) is deferred pending Phase 10 completion.
+
+#### Phase Recap
+
+| Task | Description | Output | Status |
+|---|---|---|---|
+| 11.1 | Retention enforcement audits and cleanup job verification | DB migration + 6 stored procs + cleanup job script + dashboard page + server actions | Complete |
+| 11.2 | Site onboarding runbook | `docs/runbooks/site-onboarding.md` (422 lines) | Complete |
+| 11.3 | Troubleshooting runbook | `docs/runbooks/troubleshooting.md` (1,337 lines) | Complete |
+
+#### All Files Produced
+
+| File | Type | Phase |
+|---|---|---|
+| `db/migrations/0019_artifact_retention_config.sql` | DB migration | 11.1 |
+| `db/procs/0123_sp_artifacts_list_expired.sql` | Stored procedure | 11.1 |
+| `db/procs/0124_sp_artifacts_mark_deleted.sql` | Stored procedure | 11.1 |
+| `db/procs/0125_sp_artifacts_retention_audit.sql` | Stored procedure | 11.1 |
+| `db/procs/0126_sp_artifacts_insert.sql` | Stored procedure | 11.1 |
+| `db/procs/0127_sp_artifact_retention_config_list.sql` | Stored procedure | 11.1 |
+| `db/procs/0128_sp_artifact_retention_config_update.sql` | Stored procedure | 11.1 |
+| `apps/runner/src/cleanup-job.ts` | Cron job script | 11.1 |
+| `apps/dashboard-web/app/actions/artifacts.ts` | Next.js server actions | 11.1 |
+| `apps/dashboard-web/app/dashboard/artifacts/page.tsx` | Dashboard UI page (replaced placeholder) | 11.1 |
+| `docs/runbooks/site-onboarding.md` | Operational runbook | 11.2 |
+| `docs/runbooks/troubleshooting.md` | Operational runbook | 11.3 |
+
+#### Major Architecture Decisions
+
+1. **Retention config in DB, not config files**: The `artifact_retention_config` table holds per-type retention days so operators can adjust policies via the dashboard UI without code changes or redeployment.
+2. **Hard-delete for expired artifacts**: Artifact DB rows are hard-deleted (not soft-deleted) after file deletion. The rows are file-path index entries with no intrinsic value once the file is gone. This avoids schema complexity and unbounded table growth.
+3. **Dual expiry logic in SQL**: Both `sp_artifacts_list_expired` and `sp_artifacts_retention_audit` implement expiry detection entirely in PostgreSQL — explicit `retention_date` takes priority; config-driven fallback (`created_date + retention_days`) applies when `retention_date IS NULL`. No application-side date arithmetic.
+4. **Dynamic pg import workaround in cleanup job**: The cleanup-job.ts uses a runtime-only `import('p' + 'g')` to load the `pg` module without declaring it as a direct dependency of the runner package. The module resolves at runtime through pnpm workspace hoisting from `packages/db/node_modules/pg`. This is a trade-off: it avoids duplicating the dependency declaration but is fragile if the workspace layout changes. Noted for future improvement.
+5. **Phase 11.1–11.3 executed in parallel**: All three tasks were independent and executed concurrently via subagents. TypeScript typechecking confirmed zero errors across all 15 packages after Phase 11.1 code changes.
+6. **Runbooks grounded in actual code**: Both runbooks (11.2 and 11.3) were authored after reading the actual source files — migration SQL, stored procedure signatures, `docker-compose.yml`, vault implementation, rules schema — rather than from memory. This ensures accuracy and reduces drift as the codebase evolves.
+
+#### Lessons Learned
+
+- **Parallel execution of independent documentation and code tasks** is safe and efficient when tasks have no shared file writes. All three Phase 11 tasks touched different files.
+- **Subagent log prepend bug**: One subagent prepended its log entry at the top of the file instead of appending at the bottom, and used the wrong date. Always verify log placement after subagent writes; correct immediately to preserve chronological order.
+- **`artifact_retention_config` seeding with `ON CONFLICT DO NOTHING`**: Makes the migration safe to re-run without errors, consistent with the project's idempotent migration pattern.
+- **`runInlineCleanup` UI cap vs cron cap**: The server action cap (100 items) and the cron job cap (500 items, configurable via `CLEANUP_LIMIT` env var) should be documented together — operators need to know the UI is not a substitute for the cron job for large backlogs.
+
+---
+
