@@ -6,6 +6,52 @@ This log captures all major decisions and changes made during development of the
 
 ---
 
+## May 12, 2026 — Phase 14/15/16 Server Actions: Code Review & Parameter Alignment
+
+### Context
+Code review of Phase 14/15/16 server actions revealed pervasive parameter mismatches between the TypeScript server actions and the actual deployed stored procedures. The server actions had been written against assumed schemas rather than the real proc signatures.
+
+### Files Modified
+- `apps/dashboard-web/app/actions/test-accounts.ts` — Complete rewrite (356 lines changed)
+- `apps/dashboard-web/app/actions/email-providers.ts` — Complete rewrite (635 lines changed)
+- `apps/dashboard-web/app/actions/capabilities.ts` — Minor fix (4 lines)
+
+### Issues Found & Fixed
+
+**test-accounts.ts (10+ mismatches)**
+- `createTestAccount`: Wrong params (i_site_environment_id, i_status, i_metadata_json). Proc expects i_persona_id as VARCHAR, i_metadata as JSONB, no status param (hardcoded to 'pending_registration')
+- `updateTestAccountStatus`: i_status -> i_account_status; output o_status -> o_account_status + o_email_verified
+- `requestCleanup`: Removed fictional i_reason param; i_requested_by -> i_updated_by; output o_status -> o_cleanup_status
+- `markCleaned`: i_cleaned_by -> i_updated_by
+- `listTestAccounts`: i_status/i_persona_id -> i_cleanup_status/i_account_status/i_limit/i_offset
+- TestAccount interface: merged 'status' field into separate account_status + cleanup_status; added missing DB fields
+- TestAccountAction interface: completely wrong field set (flow_key/result_status/detail_json vs action_status/step_name/duration_ms/error_message/details)
+
+**email-providers.ts (15+ mismatches)**
+- EmailProvider type had host/port/use_tls fields that don't exist in DB (table uses config_json JSONB)
+- createEmailProvider/updateEmailProvider: Removed phantom i_host/i_port/i_use_tls params; added i_secret_id, i_notes
+- listEmailProviders: i_is_active -> i_active_only
+- createInboxBindingV2: i_role -> i_role_tag; removed i_correlation_strategy; added i_campaign, i_priority
+- Template assertions: i_flow_key -> i_email_type; i_assertion_key -> i_assertion_name; i_expected_pattern -> i_expected_value
+- Timing SLAs: seconds -> milliseconds (i_max_delivery_seconds -> i_max_delivery_ms)
+- Timing results: completely different param set (i_run_execution_id based, not i_site_id)
+- Correlation configs: i_domain -> i_token_pattern; proc is _get not _list
+
+**capabilities.ts (1 fix)**
+- batchUpsertCapabilities used hardcoded 'system' instead of authContext.operatorId
+
+### Verification
+- `tsc --noEmit` passes for dashboard-web, email, playwright-core packages
+- Pre-existing Next.js 16 SSG build error on `/dashboard/settings/email-inboxes/new` (workStore invariant) — unrelated to our changes
+
+### Lesson Learned
+When generating server actions that call stored procedures, always cross-reference the actual proc SQL file signatures before writing the TypeScript. The proc is the source of truth for parameter names, types, and return columns. A mismatch table (action param -> proc param) should be produced during review.
+
+### Commit
+`51344b1` — Fix Phase 14/15/16 server actions: align all params to actual stored procedures
+
+---
+
 ## May 12, 2026 — Phase 20 Dashboard UI: Code Review Fixes + Missing SP
 
 ### Summary
