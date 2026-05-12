@@ -65,9 +65,9 @@ export async function getRetentionAudit(): Promise<{
       o_retention_days: number | null;
     }) => ({
       artifact_type: row.o_artifact_type,
-      total_count: parseInt(row.o_total_count, 10) || 0,
-      expired_count: parseInt(row.o_expired_count, 10) || 0,
-      total_size_bytes: parseInt(row.o_total_size_bytes, 10) || 0,
+      total_count: Number(row.o_total_count) || 0,
+      expired_count: Number(row.o_expired_count) || 0,
+      total_size_bytes: Number(row.o_total_size_bytes) || 0,
       oldest_artifact: row.o_oldest_artifact ?? null,
       retention_days: row.o_retention_days ?? null,
     }));
@@ -204,7 +204,7 @@ export async function listExpiredArtifacts(limit = 500): Promise<{
       artifact_type: row.o_artifact_type,
       file_path: row.o_file_path,
       file_size_bytes: row.o_file_size_bytes !== null
-        ? parseInt(row.o_file_size_bytes, 10)
+        ? Number(row.o_file_size_bytes)
         : null,
       retention_date: row.o_retention_date ?? null,
       created_date: row.o_created_date,

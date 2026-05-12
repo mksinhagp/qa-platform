@@ -35,7 +35,12 @@ BEGIN
     RETURN QUERY
     UPDATE artifact_retention_config
        SET retention_days = i_retention_days,
-           notes          = COALESCE(i_notes, notes),
+           -- NULL means "leave notes unchanged"; empty string '' means "clear notes to NULL"
+           notes          = CASE
+                                WHEN i_notes IS NULL     THEN notes   -- unchanged
+                                WHEN i_notes = ''        THEN NULL    -- explicit clear
+                                ELSE i_notes                          -- new value
+                            END,
            updated_date   = CURRENT_TIMESTAMP,
            updated_by     = i_updated_by
      WHERE artifact_type  = i_artifact_type

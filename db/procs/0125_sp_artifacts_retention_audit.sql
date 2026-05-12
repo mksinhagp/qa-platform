@@ -46,6 +46,7 @@ BEGIN
     FROM artifacts a
     LEFT JOIN artifact_retention_config arc
            ON arc.artifact_type = a.artifact_type
+          AND arc.is_active = TRUE
     GROUP BY a.artifact_type
     ORDER BY a.artifact_type;
 END;

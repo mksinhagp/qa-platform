@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import AppShell from '@/components/app-shell';
 import { Button } from '@/components/ui/button';
 import {
@@ -59,6 +59,16 @@ function ConfigRow({
   const [days, setDays] = useState(String(row.retention_days));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const editingRef = useRef(editing);
+  editingRef.current = editing;
+
+  // Keep local days in sync when the parent updates the row (e.g. after save)
+  // but only when the row is not currently being edited.
+  useEffect(() => {
+    if (!editingRef.current) {
+      setDays(String(row.retention_days));
+    }
+  }, [row.retention_days]);
 
   async function handleSave() {
     const parsed = parseInt(days, 10);
@@ -242,10 +252,14 @@ export default function ArtifactsPage() {
       const result = await runInlineCleanup();
       if (result.success && result.result) {
         setCleanupResult(result.result);
-        // Refresh audit and expired list after cleanup
+        // Refresh audit after cleanup
         await loadAudit();
         if (expiredOpen) {
+          // Section is open — refresh immediately
           await loadExpired();
+        } else {
+          // Section is closed — clear stale list so it reloads on next open
+          setExpired([]);
         }
       } else {
         setCleanupError(result.error ?? 'Cleanup failed');
