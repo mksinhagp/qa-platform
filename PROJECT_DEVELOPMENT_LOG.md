@@ -6,6 +6,136 @@ This log captures all major decisions and changes made during development of the
 
 ---
 
+## May 12, 2026 — Phase 20 Dashboard UI for Campaign Management
+
+### Summary
+
+Implemented the dashboard UI for Phase 20 campaign management. This adds a complete campaign management interface to the Next.js dashboard, including campaign listing, creation wizard, detail view with scenario matrix visualization, and execution history tracking.
+
+### Files Created
+
+**Server Actions:**
+- `apps/dashboard-web/app/actions/campaigns.ts` — Campaign CRUD, scenario matrix generation, execution lifecycle, and schedule management server actions. All operations use stored procedures via `invokeProc`/`invokeProcWrite`, with `requireCapability` auth guards and audit logging.
+
+**Dashboard Pages:**
+- `apps/dashboard-web/app/dashboard/campaigns/page.tsx` — Campaign list page with type filter, status badges, campaign type badges (smoke, regression, release_certification, payment_certification, accessibility_audit, email_deliverability), and table view.
+- `apps/dashboard-web/app/dashboard/campaigns/new/page.tsx` — 4-step campaign creation wizard:
+  - Step 1: Campaign Identity (name, type selection grid, description, target site/environment)
+  - Step 2: Test Matrix (personas, browsers, devices, networks, flows, payment scenarios multi-select with estimated scenario count)
+  - Step 3: Execution Settings (concurrency cap, retry policy, approval gate with policy selection)
+  - Step 4: Review & Create (summary of all selections, auto-generates scenario matrix on creation)
+- `apps/dashboard-web/app/dashboard/campaigns/[campaignId]/page.tsx` — Campaign detail page with:
+  - Header with campaign type badge, active status, description
+  - Action buttons: Regenerate Matrix, Execute Campaign
+  - Summary cards (total scenarios, executions, concurrency cap, approval status)
+  - Collapsible Campaign Configuration section with matrix dimension display
+  - Collapsible Scenario Matrix table (paginated to 500, shows all 7 dimensions per scenario)
+  - Collapsible Execution History table with status badges, result metrics, duration, error display
+  - Auto-refresh polling (5s) when any execution is running or pending
+
+**Files Modified:**
+- `apps/dashboard-web/components/app-shell.tsx` — Added "Campaigns" navigation link between Runs and Approvals
+- `apps/dashboard-web/next.config.ts` — Added `@qa-platform/orchestration` to `serverExternalPackages`
+
+### Architectural Decisions
+
+- **Server actions pattern**: Campaign actions follow the same pattern as existing actions (payment-providers.ts, runs.ts) — direct stored procedure calls via `invokeProc`/`invokeProcWrite`, no ORM. This keeps the campaign UI layer consistent with the rest of the dashboard.
+- **Capability-based auth**: Campaign list/detail uses `run.read` capability; create/execute/matrix-gen uses `run.execute` capability.
+- **Auto matrix generation**: When a campaign is created via the wizard, the scenario matrix is automatically generated (calls `sp_campaign_scenarios_generate_matrix`) before redirecting to the detail page.
+- **Polling pattern**: Execution history auto-refreshes every 5 seconds when any execution has `running` or `pending` status, matching the existing runs detail page pattern.
+- **UI consistency**: All pages use the same Tailwind component patterns (StatusBadge, CheckGroup, StepIndicator, SummaryRow, CollapsibleSection), same icon library (lucide-react), same color scheme (zinc/blue/green/red/amber), and same page structure (AppShell wrapper, loading/error/empty states).
+
+### Pending Work
+
+- Phase 20 scheduling logic implementation (cron parsing, webhook handling, scheduler service)
+- Phase 20 QA sign-off workflow UI (sign-off form, conditional pass, exception handling)
+- Campaign update/edit capability (sp_qa_campaigns_update stored procedure needed)
+- Campaign deactivation UI
+- Execution detail page linked to run detail
+- Email provider dimension integration in campaign creation
+
+---
+
+## May 12, 2026 — Phase 17 Runner Integration (Playwright Payment Automation)
+
+### Summary
+
+Completed Phase 17 runner integration: the Playwright runner can now resolve payment providers and scenarios from the database, inject payment profiles into checkout flows, execute provider operations (authorize/capture/void/refund) post-flow, run multi-source verification, and record payment transactions via dashboard callback.
+
+### Changes
+
+**`apps/runner/package.json`**
+- Added `@qa-platform/payment` and `@qa-platform/db` workspace dependencies
+
+**`apps/runner/src/execution-manager.ts`**
+- Extended `ExecutionRequest` interface with optional `numeric_site_id`, `numeric_site_environment_id`, and `payment_scenario_id` fields
+- Imported payment handler functions from new `payment-handler.ts` module
+- Modified `runExecution()`:
+  - Resolves payment context (provider + scenario) before browser launch when `payment_scenario_id` is present
+  - Enriches `ExecutionContext` with `paymentProfile`, `paymentScenario`, and `paymentProvider` fields
+  - Runs payment provider operations as post-step after browser flow (between flow completion and API tests)
+  - Sends `payment_transaction_result` callback to dashboard for DB recording
+  - Cleans up payment provider instance in finally block
+
+**`apps/runner/src/payment-handler.ts` (NEW)**
+- `resolvePaymentProvider()` — resolves payment provider binding for site/environment via `sp_payment_provider_bindings_resolve`
+- `resolvePaymentScenario()` — fetches scenario details (test card, expected result) via `sp_payment_scenarios_get_by_id`
+- `createProviderInstance()` — instantiates and initializes provider with sandbox/vault credentials
+- `resolvePaymentContext()` — full resolution: provider + scenario + instance (returns null for non-payment runs)
+- `enrichExecutionContext()` — builds `paymentProfile`, `paymentScenario`, `paymentProvider` from resolved context
+- `executePaymentOperation()` — runs authorize/capture/void/refund based on scenario type, with multi-source verification via `PaymentVerifier`
+- `buildPaymentTransactionPayload()` — builds `payment_transaction_result` callback body
+- `cleanupPaymentContext()` — cleans up provider instance
+
+**`packages/playwright-core/src/runner.ts`**
+- Extended `ExecutionContext` interface with `paymentScenario` (id, scenarioType, expectedResult, testAmount, expectedResponseCode, expectedResponseReason) and `paymentProvider` (id, name, providerType, isSandbox) fields
+- Checkout flows can now access `runner.executionContext.paymentScenario` to adjust assertions
+
+**`apps/dashboard-web/app/api/runner/callback/route.ts`**
+- Added `PaymentTransactionResultPayloadSchema` Zod schema for `payment_transaction_result` callback type
+- Added handler that validates callback token via `sp_run_executions_validate_token`, then inserts via `sp_payment_transactions_insert`
+- Follows same retry/idempotency pattern as existing callback types
+
+**`apps/dashboard-web/app/actions/runs.ts`**
+- Added optional `payment_scenario_ids` to `createRunSchema`
+- Modified execution materialization loop: for checkout flows with payment scenarios, creates one execution per scenario (cartesian product includes scenario dimension)
+- Passes `numeric_site_id`, `numeric_site_environment_id`, and `payment_scenario_id` in each execution payload
+
+**`packages/payment/src/` (bug fixes)**
+- `provider.ts` — fixed return type of `PaymentProviderRegistry.get()` (parenthesization)
+- `providers/authorize-net-provider.ts` — fixed imports to use `types.js` instead of `provider.js` for type imports; prefixed unused `request` parameter
+- `verification.ts` — removed unused `PaymentTransaction` import
+
+### Architectural Decisions
+
+- **Isolated payment-handler module**: Payment logic is separated from the core execution-manager into `payment-handler.ts` to keep the execution-manager focused on flow orchestration. The payment handler is stateless and testable in isolation.
+- **Post-flow payment operations**: Payment provider operations (authorize/capture/void/refund) run after the browser flow completes, not inline during form submission. This allows the site's own payment processor to handle the real transaction while we verify via provider API post-hoc.
+- **Scenario-type-driven operations**: The scenario type (success, decline, void, refund, etc.) determines which provider operations are executed: success = auth + capture, void = auth + void, refund = auth + capture + refund.
+- **Graceful degradation**: All payment resolution is optional. When `payment_scenario_id` is absent, the runner behaves exactly as before. When DB lookups fail, execution continues without payment post-step.
+- **Callback-driven recording**: Payment transactions are recorded via the same callback mechanism as execution results and API test results, using a new `payment_transaction_result` type.
+- **Reused existing SP**: The `sp_payment_transactions_insert` stored procedure (already created in Phase 17 backend) handles the insert; no new SP was needed.
+
+### Files Modified
+
+| File | Change |
+|------|--------|
+| `apps/runner/package.json` | Added `@qa-platform/payment`, `@qa-platform/db` deps |
+| `apps/runner/src/execution-manager.ts` | Payment context resolution + post-step integration |
+| `apps/runner/src/payment-handler.ts` | NEW — payment resolution, operations, verification |
+| `packages/playwright-core/src/runner.ts` | Extended `ExecutionContext` with payment fields |
+| `apps/dashboard-web/app/api/runner/callback/route.ts` | Added `payment_transaction_result` handler |
+| `apps/dashboard-web/app/actions/runs.ts` | Added `payment_scenario_ids` + execution wiring |
+| `packages/payment/src/provider.ts` | Bug fix: return type |
+| `packages/payment/src/providers/authorize-net-provider.ts` | Bug fix: imports, unused param |
+| `packages/payment/src/verification.ts` | Bug fix: unused import |
+
+### Lessons Learned
+
+- The `@qa-platform/payment` package had several pre-existing type errors (wrong import paths, incorrect return types) that were not caught because the package was never imported by the runner before. These were fixed as part of this integration.
+- The `PaymentProviderRegistry.get()` method had an incorrect return type parenthesization that made it impossible to instantiate providers — this was a latent bug from Phase 17 backend work.
+
+---
+
 ## May 12, 2026 — Phase 17, 19, 20 Implementation
 
 ### Summary
@@ -142,8 +272,8 @@ Implemented Phases 17 (Authorize.net Payment Automation), 19 (Test Data Manageme
 
 ### Pending Work
 
-- Phase 17 runner integration (Playwright payment automation flows)
-- Phase 20 dashboard UI for campaign management
+- ~~Phase 17 runner integration (Playwright payment automation flows)~~ (Completed May 12, 2026)
+- ~~Phase 20 dashboard UI for campaign management~~ (Completed May 12, 2026)
 - Phase 20 scheduling logic implementation (cron parsing, webhook handling)
 - Phase 20 QA sign-off workflow implementation
 - Database migrations need to be applied to production database

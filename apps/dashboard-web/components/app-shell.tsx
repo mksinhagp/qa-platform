@@ -27,6 +27,12 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
                 Runs
               </Link>
               <Link
+                href="/dashboard/campaigns"
+                className="flex items-center px-4 border-b-2 border-transparent hover:border-zinc-300 text-zinc-700 hover:text-zinc-900"
+              >
+                Campaigns
+              </Link>
+              <Link
                 href="/dashboard/approvals"
                 className="flex items-center px-4 border-b-2 border-transparent hover:border-zinc-300 text-zinc-700 hover:text-zinc-900"
               >

@@ -9,6 +9,7 @@ const nextConfig: NextConfig = {
     "@qa-platform/vault",
     "@qa-platform/config",
     "@qa-platform/email",
+    "@qa-platform/orchestration",
     "argon2",
     "@mapbox/node-pre-gyp",
     "pg",
