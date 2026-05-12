@@ -6,6 +6,141 @@ This log captures all major decisions and changes made during development of the
 
 ---
 
+## May 11, 2026 — Phase 11.4 and Phase 12 Complete
+
+### Phase 11.4 Completed: Disaster Recovery Runbook
+
+**Task Reference**: Master Plan Phase 11.4
+**Time**: 23:37 EDT
+
+#### Objective
+
+Produce a comprehensive, actionable disaster recovery runbook grounded in the actual scripts, volumes, and services of the QA Automation Platform. Phase 10 is fully complete, which was the stated blocker for this task.
+
+#### Output
+
+| File | Type | Size |
+|---|---|---|
+| `docs/runbooks/disaster-recovery.md` | Operational runbook | 1,193 lines / 39,589 bytes |
+
+#### Runbook Coverage
+
+| Section | Scenario |
+|---|---|
+| 1 | Overview — named volumes criticality table, backup system summary, cross-references |
+| 2 | Full host machine loss — 10-step fresh rebuild from scratch |
+| 3 | PostgreSQL data corruption/accidental deletion — identify → stop → verify → restore → validate → restart |
+| 4 | Single container failure — dashboard-web, runner, postgres (with decision tree), migrator |
+| 5 | Named volume recovery — `pg_data`, `backups`, `ollama_models` (safe re-pull) |
+| 6 | Vault master password loss — cryptographic explanation, re-bootstrap steps, post-recovery credential re-entry |
+| 7 | Backup failure / gap in history — log inspection, launchd status, manual trigger |
+| 8 | Corruption vs. loss ASCII decision tree |
+| 9 | RTO/RPO table — 11 scenarios with time estimates |
+| 10 | Pre-disaster readiness checklist — 7 sub-sections with runnable verification commands |
+
+#### Decisions Made
+
+- Cross-referenced `docs/runbooks/vault-runbook.md` Section 7 for the vault nuclear-option procedure rather than duplicating it; the DR runbook provides a high-level summary and redirects.
+- Cross-referenced `docs/runbooks/backup-cron.md` for scheduling details rather than duplicating cron/launchd steps.
+- `ollama_models` volume is explicitly noted as safe to lose (re-pull) and excluded from the critical recovery path.
+- Named the dominant RPO risk as the backup-volume-on-same-host failure mode (both `pg_data` and `backups` volumes at risk from the same disk failure).
+
+---
+
+### Phase 12 Completed: Performance Optimization
+
+**Task Reference**: Master Plan Phase 12 (Tasks 12.1 and 12.2)
+**Time**: 23:38 EDT
+
+#### Objective
+
+Optimize database query performance via composite and partial indexing, and document runner concurrency tuning and resource sizing guidance for production workloads.
+
+#### Tasks Executed in Parallel
+
+| Task | Status | Primary Deliverables |
+|---|---|---|
+| 12.1 | Complete | `db/migrations/0020_performance_indexes.sql`, `docs/decisions/008-performance-indexing.md` |
+| 12.2 | Complete | `docs/decisions/009-runner-concurrency-tuning.md` |
+
+---
+
+#### Phase 12.1: Database Query Analysis and Indexing Review
+
+**Approach**: Reviewed all 19 existing migrations and the 6 Phase 9 reporting stored procedures, 2 Phase 11.1 retention procs, approval poller patterns, email validation poller, LLM analysis patterns, and audit log query patterns. Identified the dominant gap: single-column per-table indexes do not serve multi-column filter patterns used by reporting and poller stored procedures.
+
+**14 indexes added in `0020_performance_indexes.sql`**:
+
+| # | Index Name | Table | Type | Serves |
+|---|---|---|---|---|
+| IDX-01 | `idx_run_executions_run_id_status` | `run_executions` | Composite | All 6 reporting procs |
+| IDX-02 | `idx_run_steps_execution_id_status` | `run_steps` | Composite | 0119 deduplicated issues |
+| IDX-03 | `idx_friction_signals_execution_id_signal_type` | `friction_signals` | Composite | 0120 friction signals report |
+| IDX-04 | `idx_run_steps_execution_id_step_order` | `run_steps` | Composite | 0121 execution detail (sort elimination) |
+| IDX-05 | `idx_artifacts_execution_id_type` | `artifacts` | Composite | 0121 artifact UNION ALL branch |
+| IDX-06 | `idx_runs_site_id_status_started_at` | `runs` | Composite | Dashboard run list (3-column filter) |
+| IDX-07 | `idx_runs_is_pinned_started_at` | `runs` | Composite | Pinned-runs display (sort elimination) |
+| IDX-08 | `idx_approvals_pending_timeout` | `approvals` | Partial (`status='pending'`) | Approval poller |
+| IDX-09 | `idx_llm_analysis_results_pending_error` | `llm_analysis_results` | Partial (`status IN ('pending','error')`) | LLM failed-executions proc |
+| IDX-10 | `idx_api_test_suites_failed` | `api_test_suites` | Partial (`status='failed'`) | Dashboard failure panel |
+| IDX-11 | `idx_email_validation_runs_pending` | `email_validation_runs` | Partial (`status='pending'`) | Email poller |
+| IDX-12 | `idx_artifacts_retention_date_notnull` | `artifacts` | Partial composite | 0123 expiry path A (explicit retention_date) |
+| IDX-13 | `idx_artifacts_type_created_no_retention_date` | `artifacts` | Partial composite | 0123 expiry path B + 0125 GROUP BY |
+| IDX-14 | `idx_audit_logs_created_date_actor_id` | `audit_logs` | Composite | 0021 date-range + actor filter |
+
+**All indexes use `CREATE INDEX IF NOT EXISTS` — migration is idempotent and safe to re-run.**
+
+**ADR 008** (`docs/decisions/008-performance-indexing.md`, 269 lines) documents the analysis, per-proc query pattern rationale, overlap with ADR 006 security findings (A09, F-10 motivate higher audit log write/read volume, increasing value of IDX-14), and a pre-production validation checklist.
+
+#### Phase 12.2: Runner Concurrency Tuning and Resource Profiling
+
+**Approach**: Read `apps/runner/src/execution-manager.ts` in full to document the exact slot semaphore mechanism (`waitForSlot`/`releaseSlot`), `reserveRun` singleton, LLM post-step fire-and-forget detachment, and cache TTL behavior. Read `docker-compose.yml` and `docker/docker-compose.staging.yml` to confirm no `deploy.resources` limits are currently set.
+
+**ADR 009** (`docs/decisions/009-runner-concurrency-tuning.md`, 491 lines) covers:
+
+- Exact concurrency model with code citations
+- Resource consumption model per execution slot (browser RSS by type, Node.js baseline, API test negligibility, LLM HTTP buffer impact)
+- `RUNNER_CONCURRENCY` sizing recommendations by host tier:
+
+| Host | Recommended `RUNNER_CONCURRENCY` | Peak RSS | 18-execution matrix wall-clock |
+|---|---|---|---|
+| Mac Mini M2, 8 GB | 4 | ~1.0–1.6 GB | ~18–40 min |
+| Mac Mini M4 Pro, 24 GB | 8 | ~2.0–3.2 GB | ~9–20 min |
+| Linux VPS, 4 CPU / 8 GB | 3 | ~0.8–1.2 GB | ~24–53 min |
+| Linux server, 8 CPU / 32 GB | 10 | ~2.5–4.0 GB | ~8–16 min |
+
+- Docker `deploy.resources.limits` configuration examples for each tier
+- Full env var reference table
+- `/health` and `/status` monitoring patterns, stuck-run detection and abort procedure
+- 6 known limitations (singleton constraint, no in-flight cap adjustment, browser cold start, callback gap, flow cache hot-deploy constraint, LLM connection leak scenario)
+
+#### All Files Produced
+
+| File | Type | Phase |
+|---|---|---|
+| `docs/runbooks/disaster-recovery.md` | Operational runbook | 11.4 |
+| `db/migrations/0020_performance_indexes.sql` | DB migration (14 indexes) | 12.1 |
+| `docs/decisions/008-performance-indexing.md` | Architecture Decision Record | 12.1 |
+| `docs/decisions/009-runner-concurrency-tuning.md` | Architecture Decision Record | 12.2 |
+| `master-plan-qa-automation.md` | Updated Phase 11 and 12 status to ✅ Complete | — |
+
+#### Major Decisions Made
+
+1. **Composite indexes over single-column indexes for multi-predicate stored proc queries**: The Phase 12.1 review found that all existing table-creation-time indexes were single-column; no cross-cutting composite analysis had been done before. Composite and partial indexes added in 0020 address the actual query shapes without over-indexing.
+2. **Partial indexes for status-column poller queries**: Approval poller, email poller, LLM retry poller, and API suite failure panel all read a small minority of rows (`status='pending'` or `status='failed'`). Partial indexes are significantly smaller and faster for these queries than full-column indexes.
+3. **Two partial indexes for the artifacts OR-predicate expiry query**: `sp_artifacts_list_expired` (0123) applies a two-branch OR across a nullable `retention_date`. A single full-column index cannot efficiently serve both branches. Two partial indexes (one for non-null `retention_date`, one for null with `created_date` fallback) give the query planner clean `BitmapOr` paths.
+4. **No source code modified in Phase 12**: All Phase 12 deliverables are a migration file, ADRs, and a runbook. Application code remains unchanged, consistent with the Phase 10 principle of hardening/documentation before next feature work.
+5. **`RUNNER_CONCURRENCY` default of 4 is appropriate for a Mac Mini M2**: With Chromium RSS at 100–200 MB per slot plus Node.js baseline, 4 concurrent slots peaks at ~1.0–1.6 GB leaving comfortable headroom on an 8 GB machine. Raising to 6 on M2 is possible but requires verifying actual `docker stats` memory before committing to a higher limit.
+6. **No Docker resource limits set yet**: Both `docker-compose.yml` and `docker/docker-compose.staging.yml` currently have no `deploy.resources` on the runner service. ADR 009 documents the recommended limits per tier; they should be applied after validating with `docker stats` on the target machine.
+
+#### Lessons Learned
+
+- **Index design at table-creation time is insufficient for cross-cutting query patterns**: Migrations that add a table naturally add single-column indexes on the most obvious filter columns. A dedicated cross-cutting indexing review (Phase 12.1) is needed to catch composite and partial index opportunities that only become apparent when reading stored procedure query shapes.
+- **Partial indexes on status columns are the highest-value, lowest-cost optimization** for event-loop-style applications with poller queries: the actionable population is always a tiny fraction of total rows, and a partial index has a proportionally small maintenance cost.
+- **Runner concurrency analysis requires reading the actual semaphore code**, not just the env var documentation: the `waitForSlot`/`releaseSlot` mechanism, the singleton `reserveRun` guard, and the LLM detachment pattern all have operational implications that are not visible from the env var documentation alone.
+
+---
+
 ## May 11, 2026
 
 ### Phase 7–11 Final Review Fix
