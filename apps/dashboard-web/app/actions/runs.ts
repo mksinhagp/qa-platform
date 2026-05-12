@@ -391,7 +391,10 @@ export async function createRun(data: z.infer<typeof createRunSchema>): Promise<
       };
     }> = [];
 
-    const isCheckoutFlow = (name: string) => name === 'checkout' || name.includes('checkout') || name.includes('payment');
+    // Only match actual checkout flows, not flows that merely mention "payment"
+    // (e.g. "payment-settings", "payment-history", "update-payment-method").
+    const CHECKOUT_FLOW_NAMES = new Set(['checkout', 'checkout_guest', 'checkout_express']);
+    const isCheckoutFlow = (name: string) => CHECKOUT_FLOW_NAMES.has(name);
     const paymentScenarioIds = d.payment_scenario_ids ?? [];
     
     for (const personaId of d.persona_ids) {

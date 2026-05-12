@@ -16,6 +16,7 @@
 
 import path from 'node:path';
 import { existsSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { chromium, firefox, webkit, type Browser } from '@playwright/test';
 import {
   PersonaRunner,
@@ -1085,34 +1086,59 @@ export class ExecutionManager {
         result.status !== 'skipped_by_approval'
       ) {
         try {
-          // Extract UI confirmation text from the page if still available
+          // Extract UI confirmation text from the page if still available.
+          // Target confirmation-specific selectors first; fall back to body
+          // with a length cap to avoid storing entire page dumps.
           let uiConfirmationText: string | undefined;
           try {
-            uiConfirmationText = await runner.page.textContent('body') ?? undefined;
+            const confirmSelectors = [
+              '[class*="confirm"]', '[class*="success"]', '[class*="thank"]',
+              '[id*="confirm"]', '[id*="success"]', '[id*="thank"]',
+              '[data-testid*="confirm"]', '[data-testid*="success"]',
+            ];
+            for (const sel of confirmSelectors) {
+              const el = runner.page.locator(sel).first();
+              const text = await el.textContent({ timeout: 2000 }).catch(() => null);
+              if (text && text.trim().length > 0) {
+                uiConfirmationText = text.trim();
+                break;
+              }
+            }
+            // Fallback: body text, capped to 2000 chars
+            if (!uiConfirmationText) {
+              const bodyText = await runner.page.textContent('body') ?? '';
+              uiConfirmationText = bodyText.length > 2000
+                ? bodyText.slice(0, 2000) + '...[truncated]'
+                : bodyText || undefined;
+            }
           } catch {
             // Page may have been navigated away or closed — non-fatal
           }
 
-          const opResult = await executePaymentOperation(
+          const opResults = await executePaymentOperation(
             paymentCtx,
             uiConfirmationText,
             undefined, // email receipt content — would come from email validation
             this._correlationId,
           );
 
-          // Send payment transaction result as a separate callback type
-          const paymentPayload = buildPaymentTransactionPayload(ex, paymentCtx, opResult);
-          await postCallbackWithRetry(
-            ex.callback_url,
-            ex.callback_token,
-            JSON.stringify(paymentPayload),
-            ex.execution_id,
-            this._correlationId,
-            'Payment transaction callback',
-          );
+          // Send one callback per operation so each gets its own DB record
+          for (const opResult of opResults) {
+            const idempotencyKey = randomUUID();
+            const paymentPayload = buildPaymentTransactionPayload(ex, paymentCtx, opResult, idempotencyKey);
+            await postCallbackWithRetry(
+              ex.callback_url,
+              ex.callback_token,
+              JSON.stringify(paymentPayload),
+              ex.execution_id,
+              this._correlationId,
+              `Payment ${opResult.transactionType} callback`,
+            );
+          }
 
+          const lastOp = opResults[opResults.length - 1];
           logger.info(
-            `Execution ${ex.execution_id}: payment operation complete — status="${opResult.status}" txn="${opResult.providerTransactionId ?? 'none'}"`,
+            `Execution ${ex.execution_id}: payment operations complete — ${opResults.length} operation(s), final status="${lastOp?.status}" txn="${lastOp?.providerTransactionId ?? 'none'}"`,
             undefined,
             this._correlationId,
           );

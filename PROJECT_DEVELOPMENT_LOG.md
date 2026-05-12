@@ -52,6 +52,57 @@ When generating server actions that call stored procedures, always cross-referen
 
 ---
 
+## May 12, 2026 — Phase 17 Runner Integration: Bug Fixes from Code Review
+
+### Summary
+
+Code review of Phase 17 runner payment integration identified 8 bugs (3 HIGH, 5 MEDIUM). All resolved in a single pass with typecheck verification.
+
+### Bugs Fixed
+
+1. **HIGH — Follow-up operations overwrite authorize result**: `executePaymentOperation` mutated a single result object, so the authorize step's `transactionId`/`responseCode` were overwritten by capture/void/refund. Only the last operation was recorded in the DB. **Fix**: Rewrote to return `PaymentOperationResult[]` (one entry per operation). `execution-manager.ts` now loops and sends one callback per operation, each with its own DB row.
+
+2. **HIGH — Production mode silently passes empty credentials**: `createProviderInstance` passed `{}` credentials when `config.isSandbox === false`, relying on `healthCheck()` to catch it. **Fix**: Added explicit guard — non-sandbox mode now logs a warning and returns `null` immediately until vault integration is implemented. No silent failures.
+
+3. **HIGH — `duplicate` scenario type not implemented**: The `ScenarioType` union includes `'duplicate'` and the JSDoc described it, but no code branch handled it. A `duplicate` scenario only ran one authorize. **Fix**: Added `duplicate` handling — runs a second `authorize` with the same request and records it as a separate result. Expected to be declined as a duplicate.
+
+4. **MEDIUM — `page.textContent('body')` dumps entire page into DB**: UI confirmation extraction grabbed the entire `<body>` text (potentially 50KB+) and stored it in `payment_transactions.ui_confirmation`. **Fix**: Now tries targeted selectors first (`[class*="confirm"]`, `[class*="success"]`, `[class*="thank"]`, etc.), falls back to body text capped at 2000 chars. Added `UI_CONFIRMATION_MAX_LENGTH` constant and Zod `.max(2100)` validation.
+
+5. **MEDIUM — `refund` scenario proceeds even if capture fails**: In the `refund` branch, `providerInstance.capture()` result was not checked before calling `providerInstance.refund()`. **Fix**: Added `captureSucceeded` flag; refund step only runs if capture succeeded. Failed capture is recorded as its own error result.
+
+6. **MEDIUM — catch blocks don't set `status` to `'error'`**: Follow-up operation catch blocks set `errorMessage` but left `status` as `'approved'` from the initial auth. **Fix**: Each operation now creates its own `PaymentOperationResult` with `status: 'error'` in catch blocks — no more contradictory approved+error records.
+
+7. **MEDIUM — `isCheckoutFlow` matching overly broad**: `name.includes('payment')` matched non-checkout flows like `payment-settings`, `payment-history`. **Fix**: Replaced with a curated `Set` of checkout flow names: `['checkout', 'checkout_guest', 'checkout_express']`.
+
+8. **MEDIUM — Payment transaction insert not idempotent**: `sp_payment_transactions_insert` always appended rows; retried callbacks from `postCallbackWithRetry` created duplicates. **Fix**: Added `idempotency_key` column (UUID, unique partial index), created `sp_payment_transactions_upsert` with `ON CONFLICT ... DO UPDATE`. Runner generates a `randomUUID()` per operation. Retries update existing rows.
+
+### Files Modified
+
+- `apps/runner/src/payment-handler.ts` — Rewrote `executePaymentOperation` to return `PaymentOperationResult[]`; added production credential guard; added `duplicate` scenario handling; added `UI_CONFIRMATION_MAX_LENGTH`; fixed refund-after-failed-capture; fixed error status in catch blocks; added `idempotencyKey` param to `buildPaymentTransactionPayload`
+- `apps/runner/src/execution-manager.ts` — Added `randomUUID` import; rewrote payment post-step to iterate operation results array with per-operation callbacks; improved UI confirmation extraction with targeted selectors and 2000-char cap
+- `apps/dashboard-web/app/api/runner/callback/route.ts` — Added `idempotency_key` (UUID) to Zod schema; added `.max(2100)` to `ui_confirmation`; switched from `sp_payment_transactions_insert` to `sp_payment_transactions_upsert`
+- `apps/dashboard-web/app/actions/runs.ts` — Replaced broad `isCheckoutFlow` matcher with curated `Set` of checkout flow names
+
+### Files Created
+
+- `db/migrations/0027_payment_transactions_idempotency.sql` — Adds `idempotency_key` column and unique partial index
+- `db/procs/0202_sp_payment_transactions_upsert.sql` — Idempotent upsert SP using `ON CONFLICT (idempotency_key) DO UPDATE`
+
+### Architectural Decisions
+
+- **Per-operation result pattern**: Each payment provider operation (authorize, capture, void, refund) now gets its own callback and DB row. This preserves full audit trail and avoids data loss from overwriting.
+- **Client-side idempotency keys**: The runner generates UUIDs (not the DB) so retried callbacks can be deduplicated at the DB level without server-side state tracking.
+- **Targeted UI confirmation extraction**: Prefer CSS selectors matching confirmation/success elements over full-body text dumps. 2000-char cap as safety net.
+- **Explicit production mode refusal**: Until vault credential decryption is built, non-sandbox mode returns null with a warning rather than silently proceeding with empty credentials.
+
+### Database Changes
+
+- **payment_transactions table**: Added `idempotency_key VARCHAR(255)` column (nullable, unique partial index where NOT NULL)
+- **New SP**: `sp_payment_transactions_upsert` — INSERT with ON CONFLICT upsert semantics
+- **Note**: `payment_transactions` table does not yet exist in the connected DB (migration 0024 not yet run); SQL files are ready for execution
+
+---
+
 ## May 12, 2026 — Phase 20 Dashboard UI: Code Review Fixes + Missing SP
 
 ### Summary

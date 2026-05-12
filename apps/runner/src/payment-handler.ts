@@ -42,7 +42,7 @@ export interface PaymentContext {
   providerInstance: PaymentProvider;
 }
 
-/** Result of the post-flow payment operation step */
+/** Result of a single payment provider operation (one row per DB record) */
 export interface PaymentOperationResult {
   transactionType: string;
   amount: number;
@@ -57,6 +57,9 @@ export interface PaymentOperationResult {
   redactedCvv?: string;
   errorMessage?: string;
 }
+
+/** Max length for UI confirmation text stored in DB to avoid bloating rows */
+const UI_CONFIRMATION_MAX_LENGTH = 2000;
 
 // ─── Provider registry bootstrap ─────────────────────────────────────────────
 
@@ -209,15 +212,25 @@ export async function createProviderInstance(
   try {
     const instance = new ProviderClass(config);
 
-    // In sandbox mode, use placeholder credentials
-    // In production, these would come from vault decryption
-    const credentials: Record<string, string> = {};
-    if (config.isSandbox) {
-      credentials.apiLoginId = 'sandbox-login';
-      credentials.apiTransactionKey = 'sandbox-key';
+    // In sandbox mode, use placeholder credentials.
+    // In production mode, credentials must come from vault — until vault
+    // integration is implemented, refuse to initialize to avoid calling
+    // real provider APIs with empty/undefined credentials.
+    if (!config.isSandbox) {
+      // TODO: Production mode — decrypt credentials from vault using secret IDs
+      //   config.apiLoginIdSecretId, config.apiTransactionKeySecretId, etc.
+      logger.warn(
+        `Payment provider "${config.name}" is in production mode but vault credential decryption is not yet implemented — refusing to initialize`,
+        undefined,
+        correlationId,
+      );
+      return null;
     }
-    // TODO: Production mode — decrypt credentials from vault using secret IDs
-    //   config.apiLoginIdSecretId, config.apiTransactionKeySecretId, etc.
+
+    const credentials: Record<string, string> = {
+      apiLoginId: 'sandbox-login',
+      apiTransactionKey: 'sandbox-key',
+    };
 
     await instance.initialize(credentials);
 
@@ -324,28 +337,34 @@ export function enrichExecutionContext(
 // ─── Post-flow payment operations ────────────────────────────────────────────
 
 /**
- * Execute the payment provider operation (authorize, then optionally capture/void/refund)
+ * Execute the payment provider operations (authorize, then optionally capture/void/refund)
  * based on the scenario type. Runs after the browser flow has submitted the payment form.
  *
+ * Returns an array of per-operation results so each operation (authorize, capture, etc.)
+ * gets its own DB record — the authorize step's data is never overwritten by follow-ups.
+ *
  * Scenario type mapping:
- *   success  → authorize + capture
- *   decline  → authorize (expected to fail)
- *   avs_failure / cvv_failure → authorize (expected to fail with specific codes)
- *   duplicate → authorize + authorize (second expected to fail)
- *   void     → authorize + void
- *   refund   → authorize + capture + refund
+ *   success      → authorize + capture
+ *   decline      → authorize (expected to fail)
+ *   avs_failure  → authorize (expected to fail with specific AVS code)
+ *   cvv_failure  → authorize (expected to fail with specific CVV code)
+ *   duplicate    → authorize + authorize (second expected to fail as duplicate)
+ *   void         → authorize + void
+ *   refund       → authorize + capture + refund
  */
 export async function executePaymentOperation(
   paymentCtx: PaymentContext,
   uiConfirmationText: string | undefined,
   emailReceiptContent: string | undefined,
   correlationId: string,
-): Promise<PaymentOperationResult> {
+): Promise<PaymentOperationResult[]> {
   const { providerInstance, scenario } = paymentCtx;
   const card = scenario.testCardNumber ?? '4111111111111111';
   const cvv = scenario.testCvv ?? '123';
   const expiryMonth = scenario.testExpiryMonth ?? 12;
   const expiryYear = scenario.testExpiryYear ?? new Date().getFullYear() + 3;
+  const redactedCard = PaymentVerifier.redactCardNumber(card);
+  const redactedCvv = PaymentVerifier.redactCvv(cvv);
 
   const authRequest: AuthorizeRequest = {
     amount: scenario.testAmount,
@@ -360,29 +379,33 @@ export async function executePaymentOperation(
     lastName: 'Tester',
   };
 
+  const results: PaymentOperationResult[] = [];
+
   logger.info(
     `Executing payment operation: scenario="${scenario.name}" type="${scenario.scenarioType}" card=****${card.slice(-4)} amount=${scenario.testAmount}`,
     undefined,
     correlationId,
   );
 
+  // ── Step 1: Authorize ─────────────────────────────────────────────────────
   let authResponse: AuthorizeResponse;
   try {
     authResponse = await providerInstance.authorize(authRequest);
   } catch (err) {
-    return {
+    results.push({
       transactionType: 'authorize',
       amount: scenario.testAmount,
       currency: 'USD',
       status: 'error',
-      redactedCardNumber: PaymentVerifier.redactCardNumber(card),
-      redactedCvv: PaymentVerifier.redactCvv(cvv),
+      redactedCardNumber: redactedCard,
+      redactedCvv: redactedCvv,
       errorMessage: `Authorization failed: ${String(err)}`,
-    };
+    });
+    return results;
   }
 
-  // Build base result from auth response
-  const result: PaymentOperationResult = {
+  // Build authorize result
+  const authResult: PaymentOperationResult = {
     transactionType: 'authorize',
     amount: scenario.testAmount,
     currency: 'USD',
@@ -391,18 +414,18 @@ export async function executePaymentOperation(
     providerResponseReason: authResponse.responseReason,
     providerResponseText: authResponse.responseText,
     status: authResponse.success ? 'approved' : 'declined',
-    redactedCardNumber: PaymentVerifier.redactCardNumber(card),
-    redactedCvv: PaymentVerifier.redactCvv(cvv),
+    redactedCardNumber: redactedCard,
+    redactedCvv: redactedCvv,
   };
 
-  // Run multi-source verification
+  // Run multi-source verification against the authorize response
   try {
     const verificationResult = await PaymentVerifier.verify({
       uiConfirmation: uiConfirmationText,
       emailReceiptContent,
       providerResponse: authResponse,
     });
-    result.verification = verificationResult;
+    authResult.verification = verificationResult;
   } catch (err) {
     logger.warn(
       `Payment verification failed: ${String(err)}`,
@@ -411,89 +434,227 @@ export async function executePaymentOperation(
     );
   }
 
-  // Execute follow-up operations based on scenario type
+  results.push(authResult);
+
+  // ── Follow-up operations based on scenario type ───────────────────────────
   const scenarioType = scenario.scenarioType as ScenarioType;
 
+  // success → capture after successful auth
   if (scenarioType === 'success' && authResponse.success && authResponse.transactionId) {
-    // Capture after successful auth
     try {
       const captureResp = await providerInstance.capture({
         transactionId: authResponse.transactionId,
         amount: scenario.testAmount,
       });
-      result.transactionType = 'capture';
-      result.providerResponseCode = captureResp.responseCode;
-      result.providerResponseReason = captureResp.responseReason;
-      if (!captureResp.success) {
-        result.status = 'error';
-        result.errorMessage = `Capture failed: ${captureResp.responseReason ?? captureResp.errorText}`;
-      }
+      results.push({
+        transactionType: 'capture',
+        amount: scenario.testAmount,
+        currency: 'USD',
+        providerTransactionId: captureResp.transactionId,
+        providerResponseCode: captureResp.responseCode,
+        providerResponseReason: captureResp.responseReason,
+        status: captureResp.success ? 'approved' : 'error',
+        redactedCardNumber: redactedCard,
+        redactedCvv: redactedCvv,
+        errorMessage: captureResp.success ? undefined : `Capture failed: ${captureResp.responseReason ?? captureResp.errorText}`,
+      });
     } catch (err) {
-      result.errorMessage = `Capture failed: ${String(err)}`;
+      results.push({
+        transactionType: 'capture',
+        amount: scenario.testAmount,
+        currency: 'USD',
+        status: 'error',
+        redactedCardNumber: redactedCard,
+        redactedCvv: redactedCvv,
+        errorMessage: `Capture failed: ${String(err)}`,
+      });
     }
   }
 
+  // void → void after successful auth
   if (scenarioType === 'void' && authResponse.success && authResponse.transactionId) {
-    // Void after successful auth
     try {
       const voidResp = await providerInstance.void({
         transactionId: authResponse.transactionId,
       });
-      result.transactionType = 'void';
-      result.status = voidResp.success ? 'voided' : 'error';
-      if (!voidResp.success) {
-        result.errorMessage = `Void failed: ${voidResp.responseReason ?? voidResp.errorText}`;
-      }
+      results.push({
+        transactionType: 'void',
+        amount: scenario.testAmount,
+        currency: 'USD',
+        providerTransactionId: voidResp.transactionId,
+        providerResponseCode: voidResp.responseCode,
+        providerResponseReason: voidResp.responseReason,
+        status: voidResp.success ? 'voided' : 'error',
+        redactedCardNumber: redactedCard,
+        redactedCvv: redactedCvv,
+        errorMessage: voidResp.success ? undefined : `Void failed: ${voidResp.responseReason ?? voidResp.errorText}`,
+      });
     } catch (err) {
-      result.errorMessage = `Void failed: ${String(err)}`;
+      results.push({
+        transactionType: 'void',
+        amount: scenario.testAmount,
+        currency: 'USD',
+        status: 'error',
+        redactedCardNumber: redactedCard,
+        redactedCvv: redactedCvv,
+        errorMessage: `Void failed: ${String(err)}`,
+      });
     }
   }
 
+  // refund → capture, then refund (only if capture succeeds)
   if (scenarioType === 'refund' && authResponse.success && authResponse.transactionId) {
-    // Capture then refund
+    let captureSucceeded = false;
+    // Capture step
     try {
-      await providerInstance.capture({
+      const captureResp = await providerInstance.capture({
         transactionId: authResponse.transactionId,
         amount: scenario.testAmount,
       });
-      const refundResp = await providerInstance.refund({
-        transactionId: authResponse.transactionId,
+      captureSucceeded = captureResp.success;
+      results.push({
+        transactionType: 'capture',
         amount: scenario.testAmount,
-        cardNumber: card.slice(-4),
+        currency: 'USD',
+        providerTransactionId: captureResp.transactionId,
+        providerResponseCode: captureResp.responseCode,
+        providerResponseReason: captureResp.responseReason,
+        status: captureResp.success ? 'approved' : 'error',
+        redactedCardNumber: redactedCard,
+        redactedCvv: redactedCvv,
+        errorMessage: captureResp.success ? undefined : `Capture failed: ${captureResp.responseReason ?? captureResp.errorText}`,
       });
-      result.transactionType = 'refund';
-      result.status = refundResp.success ? 'refunded' : 'error';
-      if (!refundResp.success) {
-        result.errorMessage = `Refund failed: ${refundResp.responseReason ?? refundResp.errorText}`;
-      }
     } catch (err) {
-      result.errorMessage = `Refund failed: ${String(err)}`;
+      results.push({
+        transactionType: 'capture',
+        amount: scenario.testAmount,
+        currency: 'USD',
+        status: 'error',
+        redactedCardNumber: redactedCard,
+        redactedCvv: redactedCvv,
+        errorMessage: `Capture failed: ${String(err)}`,
+      });
+    }
+
+    // Refund step — only if capture succeeded
+    if (captureSucceeded) {
+      try {
+        const refundResp = await providerInstance.refund({
+          transactionId: authResponse.transactionId,
+          amount: scenario.testAmount,
+          cardNumber: card.slice(-4),
+        });
+        results.push({
+          transactionType: 'refund',
+          amount: scenario.testAmount,
+          currency: 'USD',
+          providerTransactionId: refundResp.transactionId,
+          providerResponseCode: refundResp.responseCode,
+          providerResponseReason: refundResp.responseReason,
+          status: refundResp.success ? 'refunded' : 'error',
+          redactedCardNumber: redactedCard,
+          redactedCvv: redactedCvv,
+          errorMessage: refundResp.success ? undefined : `Refund failed: ${refundResp.responseReason ?? refundResp.errorText}`,
+        });
+      } catch (err) {
+        results.push({
+          transactionType: 'refund',
+          amount: scenario.testAmount,
+          currency: 'USD',
+          status: 'error',
+          redactedCardNumber: redactedCard,
+          redactedCvv: redactedCvv,
+          errorMessage: `Refund failed: ${String(err)}`,
+        });
+      }
+    } else {
+      logger.warn(
+        `Skipping refund — capture failed for scenario "${scenario.name}"`,
+        undefined,
+        correlationId,
+      );
     }
   }
 
-  logger.info(
-    `Payment operation complete: status="${result.status}" txn="${result.providerTransactionId ?? 'none'}" type="${result.transactionType}"`,
-    undefined,
-    correlationId,
-  );
+  // duplicate → second authorize (expected to fail as duplicate)
+  if (scenarioType === 'duplicate' && authResponse.success) {
+    try {
+      const dupResponse = await providerInstance.authorize(authRequest);
+      results.push({
+        transactionType: 'authorize',
+        amount: scenario.testAmount,
+        currency: 'USD',
+        providerTransactionId: dupResponse.transactionId,
+        providerResponseCode: dupResponse.responseCode,
+        providerResponseReason: dupResponse.responseReason,
+        providerResponseText: dupResponse.responseText,
+        // The second authorize is expected to be declined as a duplicate
+        status: dupResponse.success ? 'approved' : 'declined',
+        redactedCardNumber: redactedCard,
+        redactedCvv: redactedCvv,
+        errorMessage: dupResponse.success
+          ? 'Duplicate authorize unexpectedly succeeded'
+          : undefined,
+      });
+    } catch (err) {
+      results.push({
+        transactionType: 'authorize',
+        amount: scenario.testAmount,
+        currency: 'USD',
+        status: 'error',
+        redactedCardNumber: redactedCard,
+        redactedCvv: redactedCvv,
+        errorMessage: `Duplicate authorize failed: ${String(err)}`,
+      });
+    }
+  }
 
-  return result;
+  // decline / avs_failure / cvv_failure — authorize only (no follow-ups).
+  // Validate that the response codes match what the scenario expects.
+  if (
+    (scenarioType === 'decline' || scenarioType === 'avs_failure' || scenarioType === 'cvv_failure') &&
+    scenario.expectedResponseCode &&
+    authResponse.responseCode !== scenario.expectedResponseCode
+  ) {
+    authResult.errorMessage = `Expected response code "${scenario.expectedResponseCode}" but got "${authResponse.responseCode ?? 'none'}"`;
+  }
+
+  for (const r of results) {
+    logger.info(
+      `Payment operation: type="${r.transactionType}" status="${r.status}" txn="${r.providerTransactionId ?? 'none'}"`,
+      undefined,
+      correlationId,
+    );
+  }
+
+  return results;
 }
 
 // ─── Transaction recording via callback ──────────────────────────────────────
 
 /**
- * Build the payment_transaction_result callback payload.
- * Sent to the dashboard callback endpoint for DB recording.
+ * Build a payment_transaction_result callback payload for a single operation.
+ * The caller iterates the results array and calls this once per operation
+ * so each operation gets its own DB record.
+ *
+ * @param idempotencyKey  Client-generated key for dedup on retried callbacks
  */
 export function buildPaymentTransactionPayload(
   ex: ExecutionRequest,
   paymentCtx: PaymentContext,
   opResult: PaymentOperationResult,
+  idempotencyKey: string,
 ): Record<string, unknown> {
+  // Truncate UI confirmation to avoid storing huge page dumps
+  const rawUiConfirmation = opResult.verification?.uiConfirmationDetails ?? null;
+  const uiConfirmation = rawUiConfirmation && rawUiConfirmation.length > UI_CONFIRMATION_MAX_LENGTH
+    ? rawUiConfirmation.slice(0, UI_CONFIRMATION_MAX_LENGTH) + '...[truncated]'
+    : rawUiConfirmation;
+
   return {
     type: 'payment_transaction_result',
     execution_id: ex.execution_id,
+    idempotency_key: idempotencyKey,
     site_id: ex.numeric_site_id,
     site_environment_id: ex.numeric_site_environment_id,
     payment_provider_id: paymentCtx.provider.id,
@@ -506,7 +667,7 @@ export function buildPaymentTransactionPayload(
     provider_response_reason: opResult.providerResponseReason ?? null,
     provider_response_text: opResult.providerResponseText ?? null,
     status: opResult.status,
-    ui_confirmation: opResult.verification?.uiConfirmationDetails ?? null,
+    ui_confirmation: uiConfirmation,
     email_receipt_verified: opResult.verification?.emailReceiptVerified ?? false,
     email_receipt_details: opResult.verification?.emailReceiptDetails ?? null,
     admin_reconciled: opResult.verification?.adminReconciled ?? false,
