@@ -51,39 +51,37 @@ export async function POST() {
       error_message: string | null;
     };
 
-    // Flatten model results into probe rows the client can store
-    const probes: ProbeRow[] = result.models.flatMap(model =>
-      model.probes.map(probe => ({
-        model_id: probe.model,
-        task_type: probe.task_type,
-        available: model.available,
-        latency_ms: probe.latency_ms,
-        prompt_tokens: probe.prompt_tokens,
-        completion_tokens: probe.completion_tokens,
-        response_parseable: probe.response_parseable,
-        quality_score: probe.quality_score,
-        error_message: probe.error ?? null,
-      })),
-    );
-
-    // Add unavailable-model stubs so every model is represented in the DB
-    for (const model of result.models) {
-      if (!model.available) {
-        for (const taskType of ['selector_healing', 'failure_summarization'] as const) {
-          probes.push({
-            model_id: model.model,
-            task_type: taskType,
-            available: false,
-            latency_ms: null,
-            prompt_tokens: null,
-            completion_tokens: null,
-            response_parseable: null,
-            quality_score: null,
-            error_message: 'Model not available in Ollama',
-          });
-        }
+    // Single-pass: for available models map their probe results; for unavailable
+    // models (or available models whose probes all failed) insert one stub row per
+    // task type so every model is always represented in the DB.
+    const TASK_TYPES = ['selector_healing', 'failure_summarization'] as const;
+    const probes: ProbeRow[] = result.models.flatMap((model): ProbeRow[] => {
+      if (model.available && model.probes.length > 0) {
+        return model.probes.map(probe => ({
+          model_id: probe.model,
+          task_type: probe.task_type,
+          available: true,
+          latency_ms: probe.latency_ms,
+          prompt_tokens: probe.prompt_tokens,
+          completion_tokens: probe.completion_tokens,
+          response_parseable: probe.response_parseable,
+          quality_score: probe.quality_score,
+          error_message: probe.error ?? null,
+        }));
       }
-    }
+      // Unavailable or no probes — emit one stub per task type
+      return TASK_TYPES.map(taskType => ({
+        model_id: model.model,
+        task_type: taskType,
+        available: false,
+        latency_ms: null,
+        prompt_tokens: null,
+        completion_tokens: null,
+        response_parseable: null,
+        quality_score: null,
+        error_message: model.available ? 'No probe results returned' : 'Model not available in Ollama',
+      }));
+    });
 
     return NextResponse.json({
       run_at: result.run_at.toISOString(),

@@ -15,6 +15,18 @@ function buildProcSql(procName: string, placeholders: string): string {
   return `SELECT * FROM public.${procName}(${placeholders})`;
 }
 
+function buildPlaceholders(paramValues: unknown[]): string {
+  return paramValues
+    .map((value, i) => {
+      const placeholder = `$${i + 1}`;
+      if (Array.isArray(value) && value.every(item => Number.isInteger(item))) {
+        return `${placeholder}::integer[]`;
+      }
+      return placeholder;
+    })
+    .join(', ');
+}
+
 /**
  * Parameters for stored procedure invocation
  * All parameters use snake_case per global rules
@@ -44,9 +56,8 @@ export async function invokeProc<T = Record<string, unknown>>(
   const { useTransaction = false } = options;
 
   // Build parameter placeholders ($1, $2, ...)
-  const paramKeys = Object.keys(params);
   const paramValues = Object.values(params);
-  const placeholders = paramKeys.map((_, i) => `$${i + 1}`).join(', ');
+  const placeholders = buildPlaceholders(paramValues);
 
   // Build the function call: SELECT * FROM schema.proc_name(arg1, arg2, ...)
   const sql = buildProcSql(procName, placeholders);
@@ -75,9 +86,8 @@ export async function invokeProcInTransaction(
   procName: string,
   params: ProcParams = {}
 ): Promise<ProcResult> {
-  const paramKeys = Object.keys(params);
   const paramValues = Object.values(params);
-  const placeholders = paramKeys.map((_, i) => `$${i + 1}`).join(', ');
+  const placeholders = buildPlaceholders(paramValues);
   const sql = buildProcSql(procName, placeholders);
 
   const result = await client.query(sql, paramValues);

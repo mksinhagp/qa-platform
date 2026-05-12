@@ -4,6 +4,11 @@
 --
 -- Purpose: Get high-level run summary for narrative report header
 -- Returns: Overall run statistics with site and environment context
+--
+-- Fix (Phase 7-9 code review): All execution counts are now computed live
+-- from run_executions rather than reading the denormalised counters on the
+-- runs table.  This eliminates the inconsistency that arose when the runner
+-- crashed before the final callback updated those counters.
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION sp_report_run_summary(
@@ -51,27 +56,29 @@ BEGIN
     r.started_by,
     r.started_at,
     r.completed_at,
-    CASE 
-      WHEN r.completed_at IS NOT NULL AND r.started_at IS NOT NULL 
+    CASE
+      WHEN r.completed_at IS NOT NULL AND r.started_at IS NOT NULL
       THEN EXTRACT(EPOCH FROM (r.completed_at - r.started_at))
-      ELSE NULL 
+      ELSE NULL
     END AS duration_seconds,
-    r.total_executions,
-    r.successful_executions,
-    r.failed_executions,
-    r.skipped_executions,
-    COUNT(DISTINCT re.persona_id) AS total_personas_tested,
-    COUNT(DISTINCT re.flow_name) AS total_flows_tested,
-    COALESCE(AVG(re.friction_score), 0) AS avg_friction_score,
+    -- Compute all counts live from run_executions so they remain accurate even
+    -- if the denormalised counters on the runs table were never updated (e.g.
+    -- the runner crashed before sending the final callback).
+    COUNT(re.id)::INTEGER                                                        AS total_executions,
+    COUNT(CASE WHEN re.status IN ('passed', 'completed') THEN 1 END)::INTEGER   AS successful_executions,
+    COUNT(CASE WHEN re.status = 'failed' THEN 1 END)::INTEGER                   AS failed_executions,
+    COUNT(CASE WHEN re.status IN ('skipped_by_approval', 'aborted') THEN 1 END)::INTEGER AS skipped_executions,
+    COUNT(DISTINCT re.persona_id)::INTEGER                                       AS total_personas_tested,
+    COUNT(DISTINCT re.flow_name)::INTEGER                                        AS total_flows_tested,
+    COALESCE(AVG(re.friction_score), 0)::DECIMAL(5,2)                           AS avg_friction_score,
     r.is_pinned
   FROM runs r
-  LEFT JOIN sites s ON r.site_id = s.id
+  LEFT JOIN sites s           ON r.site_id = s.id
   LEFT JOIN site_environments se ON r.site_environment_id = se.id
   LEFT JOIN run_executions re ON r.id = re.run_id
   WHERE r.id = i_run_id
   GROUP BY r.id, r.name, r.description, r.status, r.site_id, s.name, s.base_url,
            r.site_environment_id, se.name, se.base_url, r.started_by, r.started_at,
-           r.completed_at, r.total_executions, r.successful_executions,
-           r.failed_executions, r.skipped_executions, r.is_pinned;
+           r.completed_at, r.is_pinned;
 END;
 $$;

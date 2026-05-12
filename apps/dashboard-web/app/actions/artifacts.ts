@@ -153,6 +153,8 @@ export async function updateRetentionConfig(
       o_id: number;
       o_artifact_type: string;
       o_retention_days: number;
+      o_is_active: boolean;
+      o_notes: string | null;
       o_updated_date: string;
     };
 
@@ -162,8 +164,10 @@ export async function updateRetentionConfig(
         id: row.o_id,
         artifact_type: row.o_artifact_type,
         retention_days: row.o_retention_days,
-        is_active: true,
-        notes: notes ?? null,
+        // Read is_active and notes from the DB response — not client-supplied values —
+        // so the returned row accurately reflects the persisted state.
+        is_active: row.o_is_active,
+        notes: row.o_notes ?? null,
         updated_date: row.o_updated_date,
       },
     };

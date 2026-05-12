@@ -63,6 +63,8 @@ export interface ExecutionRequest {
   flow_name: string;
   /** Site id used to load flows from sites/<site_id>/flows/index.js */
   site_id: string;
+  /** Human-readable site display name for LLM prompts and reports (optional; falls back to site_id) */
+  site_name?: string;
   /** Base URL for the site */
   base_url: string;
   /** One-time token for dashboard callbacks */
@@ -773,14 +775,21 @@ function sleep(ms: number): Promise<void> {
 
 // ─── Phase 8: LLM Failure Summarization Post-Step ────────────────────────────
 
-/**
- * Lazily-initialized Ollama client. Returns null when OLLAMA_BASE_URL is not
- * set so the LLM post-step is silently skipped in environments without Ollama.
- */
-function getOllamaClient(): OllamaClient | null {
+// Module-level singleton: created once at startup and shared across all concurrent
+// executions.  Returns null when OLLAMA_BASE_URL is not set so the LLM post-step
+// is silently skipped in environments without Ollama.
+const _ollamaClient: OllamaClient | null = (() => {
   const baseUrl = process.env['OLLAMA_BASE_URL'];
   if (!baseUrl) return null;
   return new OllamaClient({ base_url: baseUrl });
+})();
+
+/**
+ * Returns the module-level Ollama client singleton, or null when Ollama is
+ * not configured (OLLAMA_BASE_URL unset).
+ */
+function getOllamaClient(): OllamaClient | null {
+  return _ollamaClient;
 }
 
 /**
@@ -1047,24 +1056,25 @@ export class ExecutionManager {
         }
       }
 
+      // Send the main execution result callback immediately — do NOT block on the
+      // LLM post-step, which can take up to 90 s.  The LLM result is delivered
+      // via its own llm_analysis_result callback type after the fact.
+      await sendCallback(ex.callback_url, ex.callback_token, ex.execution_id, result, this._correlationId);
+
       // Phase 8: LLM failure summarization post-step.
-      // Only runs for non-aborted/non-skipped executions where Ollama is configured.
-      // Non-blocking: errors do not affect execution status or callback delivery.
+      // Fire after the main callback has been delivered so the runner never
+      // delays execution-result visibility or holds a concurrency slot for up
+      // to SUMMARIZE_TIMEOUT_MS.
       if (result.status !== 'aborted' && result.status !== 'skipped_by_approval') {
-        const persona = lookupPersona(ex.persona_id);
-        const siteName = ex.site_id;
-        try {
-          await runLlmPostStep(ex, result, persona, siteName, this._correlationId);
-        } catch (llmErr) {
+        const siteName = ex.site_name ?? ex.site_id;
+        void runLlmPostStep(ex, result, persona, siteName, this._correlationId).catch((llmErr) => {
           logger.warn(
             `Execution ${ex.execution_id}: LLM post-step error (non-fatal): ${String(llmErr)}`,
             undefined,
             this._correlationId,
           );
-        }
+        });
       }
-
-      await sendCallback(ex.callback_url, ex.callback_token, ex.execution_id, result, this._correlationId);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       state.status = 'failed';

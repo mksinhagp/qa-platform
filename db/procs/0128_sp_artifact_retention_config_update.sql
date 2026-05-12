@@ -13,7 +13,7 @@ BEGIN
 --   i_notes          TEXT          Optional notes / reason for change
 --   i_updated_by     VARCHAR(255)  Audit updater (default 'system')
 --
--- Returns: o_id, o_artifact_type, o_retention_days, o_updated_date
+-- Returns: o_id, o_artifact_type, o_retention_days, o_is_active, o_notes, o_updated_date
 --   Returns no rows if artifact_type is not found.
 -- ============================================================
 
@@ -27,6 +27,8 @@ RETURNS TABLE(
     o_id             INTEGER,
     o_artifact_type  VARCHAR(50),
     o_retention_days INTEGER,
+    o_is_active      BOOLEAN,
+    o_notes          TEXT,
     o_updated_date   TIMESTAMP WITH TIME ZONE
 )
 LANGUAGE plpgsql
@@ -44,7 +46,7 @@ BEGIN
            updated_date   = CURRENT_TIMESTAMP,
            updated_by     = i_updated_by
      WHERE artifact_type  = i_artifact_type
-    RETURNING id, artifact_type, retention_days, updated_date;
+    RETURNING id, artifact_type, retention_days, is_active, notes, updated_date;
 END;
 $$;
 

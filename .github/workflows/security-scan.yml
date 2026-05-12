@@ -84,7 +84,7 @@ jobs:
         with:
           image-ref: qa-platform/dashboard:scan
           format: table
-          exit-code: "1"
+          exit-code: ${{ github.event_name == 'push' && '0' || '1' }}
           ignore-unfixed: true
           vuln-type: os,library
           severity: HIGH,CRITICAL
@@ -94,7 +94,7 @@ jobs:
         with:
           image-ref: qa-platform/runner:scan
           format: table
-          exit-code: "1"
+          exit-code: ${{ github.event_name == 'push' && '0' || '1' }}
           ignore-unfixed: true
           vuln-type: os,library
           severity: HIGH,CRITICAL

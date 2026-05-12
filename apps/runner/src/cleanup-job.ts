@@ -122,8 +122,19 @@ async function invokeProc(
   procName: string,
   params: Record<string, unknown> = {},
 ): Promise<DbRow[]> {
-  const values = Object.values(params);
-  const placeholders = values.map((_, i) => `$${i + 1}`).join(', ');
+  const entries = Object.entries(params);
+  const values = entries.map(([, value]) => value);
+  // Build placeholders: JavaScript arrays are serialised by the pg driver as
+  // text array literals (e.g. {"1","2","3"}).  Add an explicit ::integer[] cast
+  // for any value that is a JavaScript Array so PostgreSQL receives the correct
+  // type without relying on implicit coercion. Use named function arguments so
+  // callers cannot accidentally swap values when a proc has multiple params.
+  const placeholders = entries
+    .map(([key, value], i) => {
+      const placeholder = Array.isArray(value) ? `$${i + 1}::integer[]` : `$${i + 1}`;
+      return `${key} => ${placeholder}`;
+    })
+    .join(', ');
   const sql = `SELECT * FROM public.${procName}(${placeholders})`;
   const result = await client.query(sql, values);
   return result.rows;
@@ -173,6 +184,7 @@ async function runCleanup(): Promise<void> {
     let filesDeleted = 0;
     let filesMissing = 0;
     let filesFailed = 0;
+    const missingParentDirs = new Set<string>();
     const successIds: number[] = [];
 
     for (const artifact of expired) {
@@ -189,8 +201,9 @@ async function runCleanup(): Promise<void> {
         if (nodeErr.code === 'ENOENT') {
           // File already gone — still mark DB row as deleted
           filesMissing++;
+          missingParentDirs.add(path.dirname(filePath));
           successIds.push(id);
-          console.log(`[cleanup-job]   file not found (already removed): ${filePath}`);
+          console.warn(`[cleanup-job]   file not found (already removed): ${filePath}`);
         } else {
           // Unexpected I/O error — log but do not remove DB row
           filesFailed++;
@@ -227,6 +240,14 @@ async function runCleanup(): Promise<void> {
       console.warn(
         `[cleanup-job] ${filesFailed} file(s) could not be deleted due to I/O errors. ` +
         'Their DB records were retained. Review the errors above.',
+      );
+    }
+
+    if (filesMissing > 0) {
+      console.warn(
+        `[cleanup-job] ${filesMissing} file path(s) were already missing across ` +
+        `${missingParentDirs.size} parent director${missingParentDirs.size === 1 ? 'y' : 'ies'}. ` +
+        'Verify artifact roots if this count is unexpectedly high.',
       );
     }
   } finally {

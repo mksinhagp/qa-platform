@@ -106,11 +106,13 @@ jobs:
             git reset --hard origin/main
 
             echo "==> Writing staging environment file"
-            cat > .env.staging <<EOF
-NODE_ENV=production
-DASHBOARD_SESSION_SECRET=${DASHBOARD_SESSION_SECRET}
-POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-EOF
+            umask 077
+            printf '%s\n' \
+              'NODE_ENV=production' \
+              "DASHBOARD_SESSION_SECRET=${DASHBOARD_SESSION_SECRET}" \
+              "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" \
+              > .env.staging
+            chmod 600 .env.staging
 
             echo "==> Bringing up services with staging compose override"
             docker compose \

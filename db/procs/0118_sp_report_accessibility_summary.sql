@@ -5,6 +5,11 @@
 -- Purpose: Aggregate accessibility results across all executions
 -- Returns: Axe-core severity counts, keyboard-nav pass rate, contrast pass rate
 -- Note: Accessibility checks are stored in run_steps details JSONB
+--
+-- Fix (Phase 7-9 code review): Original proc ran 10 separate SELECT INTO
+-- statements, each performing a full join of run_steps + run_executions for
+-- the same i_run_id.  Replaced with a single CTE pass using conditional
+-- aggregation so the table is scanned exactly once.
 -- ============================================================
 
 CREATE OR REPLACE FUNCTION sp_report_accessibility_summary(
@@ -24,139 +29,76 @@ RETURNS TABLE (
 )
 LANGUAGE plpgsql
 AS $$
-DECLARE
-  v_total_checks INTEGER := 0;
-  v_passed_checks INTEGER := 0;
-  v_failed_checks INTEGER := 0;
-  v_critical_issues INTEGER := 0;
-  v_serious_issues INTEGER := 0;
-  v_moderate_issues INTEGER := 0;
-  v_minor_issues INTEGER := 0;
-  v_keyboard_nav_total INTEGER := 0;
-  v_keyboard_nav_passed INTEGER := 0;
-  v_contrast_total INTEGER := 0;
-  v_contrast_passed INTEGER := 0;
-  v_reflow_total INTEGER := 0;
-  v_reflow_passed INTEGER := 0;
 BEGIN
-  -- Extract accessibility results from run_steps details JSONB
-  -- This assumes accessibility checks are stored with structure:
-  -- { "accessibility": { "axe_core": [...], "keyboard_nav": {...}, "contrast": {...}, "reflow": {...} } }
-  
+  RETURN QUERY
+  -- Single scan: aggregate all ten metrics in one pass over
+  -- the join of run_steps and run_executions.
+  WITH acc AS (
+    SELECT
+      rs.details -> 'accessibility' AS a
+    FROM run_steps rs
+    JOIN run_executions re ON rs.run_execution_id = re.id
+    WHERE re.run_id = i_run_id
+      AND rs.details -> 'accessibility' IS NOT NULL
+  )
   SELECT
-    COUNT(*) INTO v_total_checks
-  FROM run_steps rs
-  JOIN run_executions re ON rs.run_execution_id = re.id
-  WHERE re.run_id = i_run_id
-    AND rs.details->'accessibility' IS NOT NULL;
-  
-  SELECT
-    COUNT(*) INTO v_passed_checks
-  FROM run_steps rs
-  JOIN run_executions re ON rs.run_execution_id = re.id
-  WHERE re.run_id = i_run_id
-    AND rs.details->'accessibility'->>'status' = 'passed';
-  
-  SELECT
-    COUNT(*) INTO v_failed_checks
-  FROM run_steps rs
-  JOIN run_executions re ON rs.run_execution_id = re.id
-  WHERE re.run_id = i_run_id
-    AND rs.details->'accessibility'->>'status' = 'failed';
-  
-  -- Count axe-core severity issues.
-  -- The ::INTEGER cast must be INSIDE SUM() so each row value is cast before aggregation.
-  -- (rs.details->'accessibility'->'axe_core'->'violations'->>'critical') returns text per row;
-  -- SUM(text) is invalid — casting after SUM operates on the text result, not numeric values.
-  SELECT
-    COALESCE(SUM((rs.details->'accessibility'->'axe_core'->'violations'->>'critical')::INTEGER), 0) INTO v_critical_issues
-  FROM run_steps rs
-  JOIN run_executions re ON rs.run_execution_id = re.id
-  WHERE re.run_id = i_run_id
-    AND rs.details->'accessibility'->'axe_core' IS NOT NULL;
-  
-  SELECT
-    COALESCE(SUM((rs.details->'accessibility'->'axe_core'->'violations'->>'serious')::INTEGER), 0) INTO v_serious_issues
-  FROM run_steps rs
-  JOIN run_executions re ON rs.run_execution_id = re.id
-  WHERE re.run_id = i_run_id
-    AND rs.details->'accessibility'->'axe_core' IS NOT NULL;
-  
-  SELECT
-    COALESCE(SUM((rs.details->'accessibility'->'axe_core'->'violations'->>'moderate')::INTEGER), 0) INTO v_moderate_issues
-  FROM run_steps rs
-  JOIN run_executions re ON rs.run_execution_id = re.id
-  WHERE re.run_id = i_run_id
-    AND rs.details->'accessibility'->'axe_core' IS NOT NULL;
-  
-  SELECT
-    COALESCE(SUM((rs.details->'accessibility'->'axe_core'->'violations'->>'minor')::INTEGER), 0) INTO v_minor_issues
-  FROM run_steps rs
-  JOIN run_executions re ON rs.run_execution_id = re.id
-  WHERE re.run_id = i_run_id
-    AND rs.details->'accessibility'->'axe_core' IS NOT NULL;
-  
-  -- Keyboard navigation pass rate
-  SELECT
-    COUNT(*) INTO v_keyboard_nav_total
-  FROM run_steps rs
-  JOIN run_executions re ON rs.run_execution_id = re.id
-  WHERE re.run_id = i_run_id
-    AND rs.details->'accessibility'->'keyboard_nav' IS NOT NULL;
-  
-  SELECT
-    COUNT(*) INTO v_keyboard_nav_passed
-  FROM run_steps rs
-  JOIN run_executions re ON rs.run_execution_id = re.id
-  WHERE re.run_id = i_run_id
-    AND rs.details->'accessibility'->'keyboard_nav'->>'passed' = 'true';
-  
-  -- Contrast pass rate
-  SELECT
-    COUNT(*) INTO v_contrast_total
-  FROM run_steps rs
-  JOIN run_executions re ON rs.run_execution_id = re.id
-  WHERE re.run_id = i_run_id
-    AND rs.details->'accessibility'->'contrast' IS NOT NULL;
-  
-  SELECT
-    COUNT(*) INTO v_contrast_passed
-  FROM run_steps rs
-  JOIN run_executions re ON rs.run_execution_id = re.id
-  WHERE re.run_id = i_run_id
-    AND rs.details->'accessibility'->'contrast'->>'passed' = 'true';
-  
-  -- Reflow pass rate
-  SELECT
-    COUNT(*) INTO v_reflow_total
-  FROM run_steps rs
-  JOIN run_executions re ON rs.run_execution_id = re.id
-  WHERE re.run_id = i_run_id
-    AND rs.details->'accessibility'->'reflow' IS NOT NULL;
-  
-  SELECT
-    COUNT(*) INTO v_reflow_passed
-  FROM run_steps rs
-  JOIN run_executions re ON rs.run_execution_id = re.id
-  WHERE re.run_id = i_run_id
-    AND rs.details->'accessibility'->'reflow'->>'passed' = 'true';
-  
-  RETURN QUERY SELECT
-    v_total_checks,
-    v_passed_checks,
-    v_failed_checks,
-    v_critical_issues,
-    v_serious_issues,
-    v_moderate_issues,
-    v_minor_issues,
-    CASE WHEN v_keyboard_nav_total > 0 
-         THEN (v_keyboard_nav_passed::DECIMAL / v_keyboard_nav_total::DECIMAL) * 100 
-         ELSE 100 END,
-    CASE WHEN v_contrast_total > 0 
-         THEN (v_contrast_passed::DECIMAL / v_contrast_total::DECIMAL) * 100 
-         ELSE 100 END,
-    CASE WHEN v_reflow_total > 0 
-         THEN (v_reflow_passed::DECIMAL / v_reflow_total::DECIMAL) * 100 
-         ELSE 100 END;
+    -- total / passed / failed checks
+    COUNT(*)::INTEGER                                                           AS total_checks,
+    COUNT(*) FILTER (WHERE a->>'status' = 'passed')::INTEGER                   AS passed_checks,
+    COUNT(*) FILTER (WHERE a->>'status' = 'failed')::INTEGER                   AS failed_checks,
+
+    -- axe-core severity counts
+    COALESCE(SUM(
+      CASE WHEN a->'axe_core' IS NOT NULL
+           THEN (a->'axe_core'->'violations'->>'critical')::INTEGER
+           ELSE 0 END
+    ), 0)::INTEGER                                                              AS critical_issues,
+    COALESCE(SUM(
+      CASE WHEN a->'axe_core' IS NOT NULL
+           THEN (a->'axe_core'->'violations'->>'serious')::INTEGER
+           ELSE 0 END
+    ), 0)::INTEGER                                                              AS serious_issues,
+    COALESCE(SUM(
+      CASE WHEN a->'axe_core' IS NOT NULL
+           THEN (a->'axe_core'->'violations'->>'moderate')::INTEGER
+           ELSE 0 END
+    ), 0)::INTEGER                                                              AS moderate_issues,
+    COALESCE(SUM(
+      CASE WHEN a->'axe_core' IS NOT NULL
+           THEN (a->'axe_core'->'violations'->>'minor')::INTEGER
+           ELSE 0 END
+    ), 0)::INTEGER                                                              AS minor_issues,
+
+    -- keyboard navigation pass rate
+    CASE
+      WHEN COUNT(*) FILTER (WHERE a->'keyboard_nav' IS NOT NULL) > 0
+      THEN (
+        COUNT(*) FILTER (WHERE a->'keyboard_nav' IS NOT NULL AND a->'keyboard_nav'->>'passed' = 'true')::DECIMAL
+        / COUNT(*) FILTER (WHERE a->'keyboard_nav' IS NOT NULL)::DECIMAL
+      ) * 100
+      ELSE 100
+    END                                                                         AS keyboard_nav_pass_rate,
+
+    -- contrast pass rate
+    CASE
+      WHEN COUNT(*) FILTER (WHERE a->'contrast' IS NOT NULL) > 0
+      THEN (
+        COUNT(*) FILTER (WHERE a->'contrast' IS NOT NULL AND a->'contrast'->>'passed' = 'true')::DECIMAL
+        / COUNT(*) FILTER (WHERE a->'contrast' IS NOT NULL)::DECIMAL
+      ) * 100
+      ELSE 100
+    END                                                                         AS contrast_pass_rate,
+
+    -- reflow pass rate
+    CASE
+      WHEN COUNT(*) FILTER (WHERE a->'reflow' IS NOT NULL) > 0
+      THEN (
+        COUNT(*) FILTER (WHERE a->'reflow' IS NOT NULL AND a->'reflow'->>'passed' = 'true')::DECIMAL
+        / COUNT(*) FILTER (WHERE a->'reflow' IS NOT NULL)::DECIMAL
+      ) * 100
+      ELSE 100
+    END                                                                         AS reflow_pass_rate
+
+  FROM acc;
 END;
 $$;

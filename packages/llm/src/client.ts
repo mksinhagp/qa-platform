@@ -60,11 +60,16 @@ export async function listAvailableModels(baseUrl: string, timeoutMs = 5_000): P
 
 /**
  * Returns true if the given model name appears in the Ollama tags list.
- * Uses a prefix match so "qwen2.5:7b" matches "qwen2.5:7b-instruct-q4_K_M" etc.
+ * Uses a prefix match so "qwen2.5:7b" matches "qwen2.5:7b-instruct-q4_K_M" but
+ * NOT "qwen2.5:14b".  The prefix includes the full tag portion (e.g. "qwen2.5:7b")
+ * so only quantisation suffixes appended after the tag are accepted.
  */
 export async function isModelAvailable(baseUrl: string, model: LlmModelId): Promise<boolean> {
   const models = await listAvailableModels(baseUrl);
-  return models.some((m) => m === model || m.startsWith(model.split(':')[0] + ':'));
+  // Match exact name OR names that start with "<model>-" (quantised variants like
+  // "qwen2.5:7b-instruct-q4_K_M").  We do NOT accept a bare name-prefix match
+  // (e.g. "phi3:mini" must NOT match "phi3:medium").
+  return models.some((m) => m === model || m.startsWith(model + '-'));
 }
 
 // ─── Core generate call ───────────────────────────────────────────────────────

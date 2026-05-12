@@ -363,7 +363,7 @@ export async function createRun(data: z.infer<typeof createRunSchema>): Promise<
       }>).find(row => row.o_is_active);
 
     // Materialize executions (cartesian product: personas x browsers x flows x device_profiles x network_profiles)
-    const executions: Array<{ execution_id: number; site_id: string; base_url: string; callback_url: string; callback_token: string; flow_name: string; persona_id: string; browser: string; email_validation?: { inbox_id: number; correlation_token: string; test_email: string; expected_subject_pattern?: string; wait_timeout_ms?: number } }> = [];
+    const executions: Array<{ execution_id: number; site_id: string; site_name: string; base_url: string; callback_url: string; callback_token: string; flow_name: string; persona_id: string; browser: string; email_validation?: { inbox_id: number; correlation_token: string; test_email: string; expected_subject_pattern?: string; wait_timeout_ms?: number } }> = [];
     
     for (const personaId of d.persona_ids) {
       for (const browser of d.browsers) {
@@ -402,6 +402,7 @@ export async function createRun(data: z.infer<typeof createRunSchema>): Promise<
               executions.push({
                 execution_id: executionId,
                 site_id: d.site_id.toString(),
+                site_name: siteResult.site.name,
                 base_url: environmentResult.environment.base_url || siteResult.site.base_url,
                 callback_url: callbackUrl,
                 callback_token: callbackToken,

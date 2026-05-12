@@ -114,7 +114,7 @@ services:
     volumes:
       - backups:/backups
       - ./docker/postgres/backup.sh:/usr/local/bin/backup.sh:ro
-    command: ["/bin/sh", "-c", "chmod +x /usr/local/bin/backup.sh && /usr/local/bin/backup.sh"]
+    command: ["/bin/sh", "/usr/local/bin/backup.sh"]
     depends_on:
       postgres:
         condition: service_healthy

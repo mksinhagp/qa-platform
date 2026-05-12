@@ -77,7 +77,10 @@ const CANDIDATE_LINE_RE = /^\d+\.\s+SELECTOR:\s*(.+?)\s*\|\s*CONFIDENCE:\s*([\d.
  * Returns an empty array on any parse failure (caller handles gracefully).
  */
 export function parseSelectorCandidates(rawText: string): SelectorCandidate[] {
-  const candidatesSection = rawText.split('CANDIDATES:').pop() ?? '';
+  // Use [1] (first split after the marker) rather than .pop() so that if the
+  // LLM repeats the literal "CANDIDATES:" inside a rationale the parser does
+  // not silently discard all earlier candidates.
+  const candidatesSection = rawText.split('CANDIDATES:')[1] ?? '';
   const lines = candidatesSection.split('\n').map((l) => l.trim()).filter(Boolean);
 
   const candidates: SelectorCandidate[] = [];

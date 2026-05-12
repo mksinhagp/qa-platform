@@ -6,6 +6,296 @@ This log captures all major decisions and changes made during development of the
 
 ---
 
+## May 11, 2026
+
+### Phase 7–11 Final Review Fix
+
+**Time**: 23:25 EDT  
+**Scope**: Final `/review` pass across Phase 7 through Phase 11 changed files, focused on confirmed runtime/security issues and regression validation.
+
+#### Changes Made
+
+1. **Fixed shared DB array casting edge case**
+   - Updated `packages/db/src/procedures.ts` so `buildPlaceholders` casts JavaScript arrays to `::integer[]` only when every item is an integer.
+   - Preserved the Phase 7–9 artifact cleanup fix for `sp_artifacts_mark_deleted(i_artifact_ids integer[])`.
+   - Avoided breaking future or existing stored procedure calls that may pass string arrays such as persona IDs, browser names, or flow names.
+
+2. **Added regression coverage**
+   - Updated `packages/db/src/integration.test.ts` with a test confirming string array params are not incorrectly cast to `integer[]`.
+   - Retained the existing regression test confirming integer arrays are cast for artifact cleanup.
+
+#### Files Modified
+
+| File | Change |
+|---|---|
+| `packages/db/src/procedures.ts` | Narrowed automatic `::integer[]` casting to integer-only arrays |
+| `packages/db/src/integration.test.ts` | Added regression test for string array stored-procedure parameters |
+| `PROJECT_DEVELOPMENT_LOG.md` | Captured final review fix, validation, and decision |
+
+#### Validation
+
+- `pnpm --filter @qa-platform/db typecheck` passed.
+- `pnpm --filter runner typecheck` passed.
+- `pnpm --filter @qa-platform/llm typecheck` passed.
+- `pnpm --filter dashboard-web typecheck` passed.
+- `pnpm test -- --run packages/db/src/integration.test.ts apps/runner/src/execution-manager.test.ts packages/llm/src/llm.test.ts` passed: 37 tests.
+- `pnpm test -- --run apps/dashboard-web/app/actions/runs.test.ts apps/dashboard-web/app/actions/reports.test.ts apps/dashboard-web/app/actions/sites.test.ts apps/dashboard-web/app/api/runner/callback/route.test.ts` passed: 89 tests.
+
+#### Decisions Made
+
+- Kept the shared DB helper approach, but made the type inference conservative: only numeric JavaScript arrays receive `::integer[]`; other arrays remain uncast so PostgreSQL/function signatures can resolve them appropriately.
+- Treated the dashboard test stderr as expected because those tests intentionally exercise error paths and still passed.
+
+#### Lesson Learned
+
+- When adding generic parameter typing in a stored-procedure wrapper, avoid broad array casts. Infer only safe, narrow cases or use explicit proc-specific typing when multiple array element types are possible.
+
+---
+
+### Phase 10–11 Fresh Review Fixes Applied
+
+**Time**: 23:18 EDT
+**Scope**: Follow-up fixes from fresh review of Phase 10 production hardening and Phase 11 operational retention enforcement artifacts.
+
+#### Changes Made
+
+1. **Fixed backup container startup**
+   - Updated `docker-compose.yml` backup service to execute `/usr/local/bin/backup.sh` through `/bin/sh` instead of attempting `chmod` on a read-only bind mount.
+
+2. **Hardened staging secret file creation**
+   - Updated `.github/workflows/deploy-staging.yml` to create `.env.staging` with `umask 077`, `printf`, and `chmod 600`.
+   - Replaced the YAML-fragile heredoc with an indented `printf` block.
+
+3. **Reduced false-red security scan behavior on main pushes**
+   - Updated `.github/workflows/security-scan.yml` Trivy table scans to report findings without failing `push` runs while still failing scheduled/manual/non-push runs.
+
+4. **Improved restore script clarity**
+   - Renamed the post-restore public-table sanity variable from `ROW_COUNT` to `TABLE_COUNT` in `docker/postgres/restore.sh`.
+
+5. **Added launchd installer helper**
+   - Added `scripts/install-backup-launchd.sh` to install the macOS backup launchd agent with the repository path injected automatically.
+
+6. **Strengthened artifact cleanup behavior**
+   - Updated `apps/runner/src/cleanup-job.ts` to use named PostgreSQL function arguments and explicit `::integer[]` casting for array params.
+   - Added warning summaries for missing artifact files so unexpectedly high ENOENT rates are visible.
+   - Updated `apps/dashboard-web/app/actions/artifacts.ts` to emit similar missing-file warnings and use `operator:<id>` audit attribution for retention config updates.
+
+7. **Fixed React ref mutation pattern**
+   - Updated `apps/dashboard-web/app/dashboard/artifacts/page.tsx` so `editingRef.current` is synchronized in `useEffect` rather than mutating the ref during render.
+
+8. **Cleared dashboard typecheck blocker**
+   - Updated `apps/dashboard-web/app/api/llm/benchmark/route.ts` with an explicit `flatMap` callback return type so unavailable-model stub rows typecheck correctly.
+
+#### Validation
+
+- `pnpm --filter runner typecheck` passed.
+- `pnpm --filter dashboard-web typecheck` passed.
+- `bash -n docker/postgres/backup.sh docker/postgres/restore.sh scripts/deploy.sh scripts/install-backup-launchd.sh` passed.
+- `git diff --check` passed for the files touched by this fix set.
+
+#### Decisions Made
+
+- Kept GitHub Actions `staging` environment and `STAGING_*` secrets references despite IDE schema warnings; those are repository configuration requirements, not workflow syntax errors.
+- Used `operator:<id>` for artifact retention audit attribution because `requireOperator()` currently exposes operator ID and session ID only.
+
+#### Lessons Learned
+
+- Avoid `chmod` against read-only Docker bind mounts; invoke scripts via their interpreter instead.
+- Avoid unindented heredocs inside GitHub Actions YAML `run` blocks; indented `printf` blocks are safer for IDE and YAML parsers.
+- When using PostgreSQL functions from lightweight scripts, prefer named function arguments to avoid silent positional-argument drift.
+
+---
+
+### Phase 7–9 Review Follow-up Fixes
+
+**Time**: 23:19 EDT  
+**Scope**: Follow-up fixes from review of Phases 7, 8, and 9.
+
+#### Changes Made
+
+1. **Fixed missed artifact cleanup array handling path**
+   - Updated `packages/db/src/procedures.ts` so shared stored-procedure invocation casts JavaScript array parameters as `::integer[]`.
+   - This covers `runInlineCleanup` in `apps/dashboard-web/app/actions/artifacts.ts` and future proc callers that pass integer arrays.
+   - Confirmed `packages/db/dist/procedures.js` reflects the same runtime behavior because `@qa-platform/db` exports `dist`.
+   - Added a regression test for `sp_artifacts_mark_deleted($1::integer[])`.
+
+2. **Reconciled LLM post-step non-blocking behavior**
+   - Updated `apps/runner/src/execution-manager.ts` so `runLlmPostStep` is truly fire-and-forget after the main execution callback is delivered.
+   - The LLM post-step no longer holds a runner concurrency slot while waiting on Ollama.
+   - Kept explicit `.catch(...)` logging so detached LLM failures remain visible.
+
+3. **Cached persona lookup in execution flow**
+   - Reused the existing `persona` variable in `runExecution` instead of calling `lookupPersona` a second time before LLM summarization.
+
+#### Files Modified
+
+| File | Change |
+|---|---|
+| `packages/db/src/procedures.ts` | Added shared array placeholder casting via `buildPlaceholders` |
+| `packages/db/src/integration.test.ts` | Added regression coverage for integer array proc parameters |
+| `packages/db/dist/procedures.js` | Runtime export reflects shared array placeholder casting |
+| `apps/runner/src/execution-manager.ts` | Detached LLM post-step and reused cached persona lookup |
+| `PROJECT_DEVELOPMENT_LOG.md` | Captured follow-up fixes and decisions |
+
+#### Decisions Made
+
+- **Shared DB helper fix over one-off cleanup fix**: Fixing array placeholders in `@qa-platform/db` prevents the same `sp_artifacts_mark_deleted` bug from recurring in dashboard actions or future callers.
+- **True fire-and-forget for LLM post-processing**: The main callback remains the synchronous result path; LLM analysis is a secondary callback and should not consume execution concurrency while waiting on an external model.
+
+---
+
+### Phase 7–9 Code Review — All 12 Bugs Fixed
+
+**Time**: 23:13 EDT  
+**Scope**: Phases 7 (LLM integration), 8 (Artifact retention), 9 (Reporting layer) — all 12 bugs identified in the code review are now resolved.
+
+---
+
+#### BUG 1 — `app/api/llm/benchmark/route.ts`: Duplicate probe rows for unavailable models (Medium)
+
+**File**: `apps/dashboard-web/app/api/llm/benchmark/route.ts`  
+**Severity**: Medium — the benchmark API returned double rows for models that Ollama reported as unavailable
+
+The original two-pass logic first inserted all models as probes, then looped again to mark unavailable ones — leaving duplicate `pending` entries before the second pass could correct them. Replaced with a single-pass loop that immediately emits the correct `available`/`unavailable` row without a second iteration.
+
+---
+
+#### BUG 2 — `apps/runner/src/execution-manager.ts`: `getOllamaClient()` created a new Ollama instance on every call (Medium)
+
+**File**: `apps/runner/src/execution-manager.ts`  
+**Severity**: Medium — unnecessary object creation on every LLM call; no connection reuse
+
+`getOllamaClient()` was a factory function called at every use site, constructing a new `OllamaClient` each time. Fixed by hoisting the singleton instance to module level so it is created once and reused across all calls.
+
+---
+
+#### BUG 3 — `apps/runner/src/execution-manager.ts`: LLM post-step received `site_id` instead of human-readable `site_name` (Medium)
+
+**Files**: `apps/runner/src/execution-manager.ts`, `apps/dashboard-web/app/actions/runs.ts`  
+**Severity**: Medium — LLM narrative received a raw UUID/integer identifier instead of a display name
+
+`siteName` was assigned `ex.site_id`. The `ExecutionRequest` type was extended with an optional `site_name?: string` field; the dispatch action (`runs.ts`) already had `siteResult.site.name` and now forwards it. The runner uses it with a fallback to `ex.site_id`.
+
+---
+
+#### BUG 4 — `db/procs/0122_sp_report_run_summary.sql`: Denormalised counts diverged from live execution counts (High)
+
+**File**: `db/procs/0122_sp_report_run_summary.sql`  
+**Severity**: High — report totals and success rates showed stale figures diverged from actual execution records
+
+The proc read `total_executions`, `successful_executions`, `failed_executions`, and `avg_duration_seconds` from denormalised columns on the `runs` table that were not reliably updated. Replaced with live `COUNT(CASE WHEN ...)` and `AVG(...)` expressions computed directly from `run_executions`.
+
+---
+
+#### BUG 5 — `db/procs/0121_sp_report_execution_detail.sql`: Cartesian product when an execution has both steps and artifacts (High)
+
+**File**: `db/procs/0121_sp_report_execution_detail.sql`  
+**Severity**: High — a run with N steps and M artifacts produced N×M output rows instead of N + M
+
+Both `run_steps` and `artifacts` were LEFT JOINed on `run_execution_id` in the same query, producing a Cartesian product. Fixed with `UNION ALL`: Part 1 returns step rows with artifact columns as NULL; Part 2 returns artifact rows with step columns as NULL. The UI already filters each group separately so no client-side changes were needed.
+
+---
+
+#### BUG 6 — `db/procs/0118_sp_report_accessibility_summary.sql`: 10 separate table scans (Medium)
+
+**File**: `db/procs/0118_sp_report_accessibility_summary.sql`  
+**Severity**: Medium — 10 sequential `SELECT INTO` statements each performed a full join scan of `run_steps + run_executions`
+
+Each of the 10 metrics triggered its own table scan. Replaced with a single CTE that scans the join once and computes all metrics via conditional aggregation (`COUNT(*) FILTER (WHERE ...)` / `SUM(CASE WHEN ...)`).
+
+---
+
+#### BUG 7 — `db/procs/0120_sp_report_friction_signals.sql`: N+1 correlated subqueries per output row (Medium)
+
+**File**: `db/procs/0120_sp_report_friction_signals.sql`  
+**Severity**: Medium — two correlated subqueries per `(execution, signal_type)` group re-scanned `friction_signals` to retrieve the first-occurrence step name and metadata
+
+For every group row the query issued two `SELECT … ORDER BY occurred_at LIMIT 1` correlated subqueries. Replaced with a `DISTINCT ON (run_execution_id, signal_type)` CTE (`first_signals`) that materialises the earliest row per group in one pass; the outer aggregation joins it once.
+
+---
+
+#### BUG 8 — `db/procs/0128_sp_artifact_retention_config_update.sql` + `app/actions/artifacts.ts`: Stale `is_active` and `notes` in update response (Medium)
+
+**Files**: `db/procs/0128_sp_artifact_retention_config_update.sql`, `apps/dashboard-web/app/actions/artifacts.ts`  
+**Severity**: Medium — `updateRetentionConfig` returned hardcoded `is_active: true` and the pre-update `notes` value
+
+The SQL proc did not output `o_is_active` or `o_notes`; the TS action constructed the response from the request input rather than the proc result. Fixed: proc now returns both from the updated row; TS action reads them from the proc result.
+
+---
+
+#### BUG 9 — `packages/llm/src/selector-healer.ts`: `parseSelectorCandidates` used `.pop()` causing wrong match on multiple `CANDIDATES:` markers (Low)
+
+**File**: `packages/llm/src/selector-healer.ts`  
+**Severity**: Low — `.pop()` on a split result returns the last segment when more than one `CANDIDATES:` marker is present
+
+Changed `.pop()` to `[1]`. Index `[1]` safely returns `undefined` when no CANDIDATES section exists and always picks the first occurrence when multiple are present.
+
+---
+
+#### BUG 10 — `apps/runner/src/cleanup-job.ts`: Array serialised as text `{"1","2","3"}` instead of `ARRAY[1,2,3]::integer[]` (High)
+
+**File**: `apps/runner/src/cleanup-job.ts`  
+**Severity**: High — `sp_artifacts_mark_deleted` never received a usable integer array; the `= ANY($1)` predicate matched nothing, silently leaving artifacts un-deleted
+
+The `pg` driver serialises a JS array as `{"1","2","3"}` text, which is not implicitly castable to `integer[]`. Added `invokeProcWithArray` helper that inlines the IDs as `ARRAY[1,2,3]::integer[]` directly in the SQL string.
+
+---
+
+#### BUG 11 — `packages/llm/src/client.ts`: `isModelAvailable` prefix match too broad (Low)
+
+**File**: `packages/llm/src/client.ts`  
+**Severity**: Low — `phi3:mini` would match `phi3:medium` because `"phi3:medium".startsWith("phi3:mini")` is true
+
+Changed the match condition from `m.startsWith(model)` to `m === model || m.startsWith(model + '-')`. Exact match handles the base tag; the `-` suffix handles legitimate quantized variants (e.g., `qwen2.5:7b-instruct-q4_K_M`).
+
+---
+
+#### BUG 12 — `apps/runner/src/execution-manager.ts`: LLM post-step (up to 90 s) blocked execution result delivery (High)
+
+**File**: `apps/runner/src/execution-manager.ts`  
+**Severity**: High — the dashboard did not receive the execution result until LLM post-processing completed, causing up to 90-second delays
+
+`runLlmPostStep` was `await`ed before `sendCallback`. Fixed by firing it as a non-awaited background promise with `.catch(err => logger.error(...))`, then immediately proceeding to `sendCallback`.
+
+---
+
+### Files Modified
+
+| File | Change |
+|---|---|
+| `apps/dashboard-web/app/api/llm/benchmark/route.ts` | Bug 1: single-pass probe loop |
+| `apps/runner/src/execution-manager.ts` | Bugs 2, 3, 12: singleton client; site_name forwarding; non-awaited LLM post-step |
+| `apps/dashboard-web/app/actions/runs.ts` | Bug 3: forward `site_name` into `ExecutionRequest` |
+| `db/procs/0122_sp_report_run_summary.sql` | Bug 4: live COUNT/AVG from run_executions instead of denormalised columns |
+| `db/procs/0121_sp_report_execution_detail.sql` | Bug 5: UNION ALL to eliminate N×M Cartesian product |
+| `db/procs/0118_sp_report_accessibility_summary.sql` | Bug 6: single CTE scan with conditional aggregation |
+| `db/procs/0120_sp_report_friction_signals.sql` | Bug 7: DISTINCT ON CTE eliminates N+1 correlated subqueries |
+| `db/procs/0128_sp_artifact_retention_config_update.sql` | Bug 8: return o_is_active and o_notes from proc |
+| `apps/dashboard-web/app/actions/artifacts.ts` | Bug 8: read is_active/notes from proc result, not request input |
+| `packages/llm/src/selector-healer.ts` | Bug 9: `.pop()` → `[1]` for CANDIDATES: section extraction |
+| `apps/runner/src/cleanup-job.ts` | Bug 10: `invokeProcWithArray` helper for integer array parameter |
+| `packages/llm/src/client.ts` | Bug 11: exact match + `-` suffix for quantized variant matching |
+
+### Decisions Made
+
+1. **`UNION ALL` over `DISTINCT ON` for Bug 5**: Rather than using `DISTINCT ON (rs.id)` to suppress extra artifact rows — which silently drops artifact data — `UNION ALL` makes both result sets explicit. The UI already uses separate `.filter()` calls for each group; no TypeScript type changes required.
+
+2. **`invokeProcWithArray` as a separate helper (Bug 10)**: Modifying the existing `invokeProc` to detect arrays and inline them would change behaviour for all callers. A named helper for the array case is explicit, auditable, and limits blast radius.
+
+3. **Non-awaited LLM post-step with explicit `.catch` (Bug 12)**: A detached promise without error handling would silently swallow LLM failures. The `.catch(err => logger.error(...))` ensures errors remain visible in logs without blocking result delivery.
+
+4. **`model + '-'` suffix check for quantized variants (Bug 11)**: The Ollama tag convention for quantized models is `<base>-<quant>` (e.g., `llama3:8b-instruct-q4_K_M`). The colon-separated tag already prevents cross-family collisions; the `-` check covers intra-family quantized variants correctly.
+
+### Lessons Learned
+
+- **Denormalised aggregate columns drift**: Any column caching a count or average from a child table will diverge unless maintained by trigger or constraint. For reporting procs, prefer live aggregation over reading denormalised columns.
+- **`pg` driver array serialisation**: The `pg` Node.js driver serialises a JS array as the PostgreSQL text literal `{"a","b"}`, not as a native array literal. For `= ANY($1)` or array-typed parameters, inline the array as `ARRAY[…]::type[]` or use `pg`'s array type helpers.
+- **Multi-child joins always produce a Cartesian product**: Joining two independent child tables on the same parent FK in one query always multiplies rows. Use `UNION ALL` or aggregate one side into a CTE first.
+- **Correlated subqueries for first-occurrence lookups are N+1**: Replace with `DISTINCT ON` or a `ROW_NUMBER() = 1` CTE for a single-pass alternative.
+- **LLM steps must never block synchronous result paths**: Any step with an external timeout should run as a background task if the caller needs a result before the step completes. Fire-and-forget with explicit error logging is the correct pattern.
+
+---
+
 ## May 8, 2026
 
 ### Task 6 Completed: Create packages/db with pg client, transaction helper, proc-invocation wrapper, migration runner

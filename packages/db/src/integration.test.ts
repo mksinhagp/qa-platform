@@ -96,6 +96,17 @@ describe('db integration', () => {
         []
       );
     });
+
+    it('should cast array parameters to integer arrays', async () => {
+      mockQuery.mockResolvedValueOnce({ rows: [{ o_deleted_count: 3 }] });
+
+      await invokeProc('sp_artifacts_mark_deleted', { i_artifact_ids: [1, 2, 3] });
+
+      expect(mockQuery).toHaveBeenCalledWith(
+        'SELECT * FROM public.sp_artifacts_mark_deleted($1::integer[])',
+        [[1, 2, 3]]
+      );
+    });
   });
 
   describe('invokeProcScalar', () => {
