@@ -8,7 +8,7 @@
  * 4. Verify new login works
  */
 
-import type { Page } from 'playwright';
+import type { Page } from '@playwright/test';
 
 /** Password reset selectors from site configuration */
 export interface PasswordResetSelectors {

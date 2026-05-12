@@ -6,7 +6,7 @@
  * - Code extraction: enters verification code from email
  */
 
-import type { Page } from 'playwright';
+import type { Page } from '@playwright/test';
 
 /** How verification is completed */
 export type VerificationMethod = 'link_click' | 'code_entry';

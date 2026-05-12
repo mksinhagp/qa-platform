@@ -6,7 +6,7 @@
  * Works with any site configured via the Phase 14 generic site model.
  */
 
-import type { Page } from 'playwright';
+import type { Page } from '@playwright/test';
 
 /** Registration field mapping from site rules */
 export interface RegistrationFieldMapping {

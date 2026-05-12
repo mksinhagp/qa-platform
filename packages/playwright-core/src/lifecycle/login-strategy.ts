@@ -5,7 +5,7 @@
  * magic link, email OTP, and manual/SSO approval-gated login.
  */
 
-import type { Page } from 'playwright';
+import type { Page } from '@playwright/test';
 
 /** Supported login strategy types */
 export type LoginStrategyType =
@@ -65,7 +65,7 @@ export interface LoginOptions {
 
 /** Email + password login */
 export class EmailPasswordStrategy implements LoginStrategy {
-  readonly type = 'email_password' as const;
+  readonly type: LoginStrategyType = 'email_password';
 
   async execute(
     page: Page,
