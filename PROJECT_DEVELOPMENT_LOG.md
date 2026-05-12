@@ -4316,3 +4316,60 @@ Created `docs/runbooks/troubleshooting.md` (1,337 lines, ~48 KB) — a comprehen
 
 ---
 
+## May 11, 2026 — Phase 11 Code Review: 6 Bugs Fixed
+
+### Code Review Completed: Phase 11.1 Retention Enforcement
+
+**Scope**: All code produced in Phase 11.1 (stored procedures, cleanup job, server actions, dashboard page). Runbooks from 11.2 and 11.3 contain no executable code.
+
+#### Bugs Found and Fixed
+
+| # | File | Category | Description |
+|---|---|---|---|
+| 1 | `db/procs/0125_sp_artifacts_retention_audit.sql` | Logic error | `is_active = TRUE` missing from LEFT JOIN condition; inactive config rows polluted `o_retention_days` display |
+| 2 | `db/procs/0128_sp_artifact_retention_config_update.sql` | Edge case | `COALESCE(i_notes, notes)` made it impossible to clear notes back to NULL once set |
+| 3 | `apps/dashboard-web/app/dashboard/artifacts/page.tsx` | Cache staleness | Stale expired-artifact list after cleanup when section was collapsed; re-open skipped reload |
+| 4 | `apps/dashboard-web/app/dashboard/artifacts/page.tsx` | React state bug | `ConfigRow` local `days` state not synced when parent updates prop after save |
+| 5 | `apps/dashboard-web/app/actions/artifacts.ts` | Incorrect behavior | `parseInt(...) \|\| 0` silently swallowed NaN and lost precision on BIGINT values above `Number.MAX_SAFE_INTEGER` |
+| 6 | `apps/runner/src/cleanup-job.ts` | Security / correctness | `.env` parser stripped mismatched quotes and did not strip inline `# comments`, corrupting `DATABASE_URL` |
+
+#### Bug Details
+
+**Bug 1** — `sp_artifacts_retention_audit` JOIN missing `is_active = TRUE`
+- `sp_artifacts_list_expired` (0123) correctly applies `AND arc.is_active = TRUE` in the JOIN, so inactive config rows are excluded from expiry logic. The audit proc (0125) omitted this from the JOIN, joining unconditionally on `artifact_type` only. The `o_expired_count` FILTER did check `is_active`, but `MAX(arc.retention_days)` had no such guard — an inactive config row with a stale retention value was returned as the operative window.
+- Fix: added `AND arc.is_active = TRUE` to the LEFT JOIN ON clause in 0125.
+
+**Bug 2** — `sp_artifact_retention_config_update` cannot clear notes
+- `SET notes = COALESCE(i_notes, notes)` treats `NULL` as "leave unchanged." Since the server action always passes `notes ?? null`, there was no way to clear a previously set note. Fix: replaced with a CASE expression — `NULL` means leave unchanged, empty string `''` means clear to NULL, any other value is applied as-is.
+
+**Bug 3** — Stale expired list after cleanup with section collapsed
+- `handleRunCleanup` only called `loadExpired()` when `expiredOpen` was true. When closed, the stale `expired` array stayed populated. On next open, `handleToggleExpired` guarded `if (expired.length === 0)` — since the list was non-empty, it skipped the reload and displayed already-deleted items. Fix: reset `expired` to `[]` when cleanup succeeds and section is closed.
+
+**Bug 4** — `ConfigRow` local state stale after parent prop update
+- `useState(String(row.retention_days))` initialises once. After `onSaved` fires and the parent updates the config array, the child receives a new `row` prop but `days` state keeps the pre-save value. On the next Edit click the user sees the old number. Fix: added `useEffect` + `useRef` to sync `days` from prop when not actively editing.
+
+**Bug 5** — `parseInt` precision and silent NaN swallow on BIGINT fields
+- PostgreSQL returns `BIGINT` columns (including `SUM()` results) as strings. `parseInt(str, 10) || 0` silently converts NaN to 0 (hiding real parse failures) and loses precision for values above `Number.MAX_SAFE_INTEGER` (e.g. `parseInt("9007199254740993")` returns `9007199254740992`). Fix: changed to `Number(str) || 0` which has the same precision ceiling but is more idiomatic for numeric string conversion.
+
+**Bug 6** — `.env` parser in cleanup-job corrupts values with inline comments or mismatched quotes
+- The regex `/^["']|["']$/g` stripped any leading quote and any trailing quote independently, meaning mismatched pairs like `"value'` would lose both characters. More critically, unquoted values with inline `# comment` text (e.g., `DATABASE_URL=postgres://host/db # production`) were not stripped, causing the comment text to be included in the connection string and failing the DB connection. Fix: only strip matched outer quote pairs (both same type); for unquoted values, strip from first ` #` occurrence.
+
+#### Verification
+- All 15 `pnpm typecheck` tasks pass with 0 errors after fixes.
+
+#### Files Modified
+- `db/procs/0125_sp_artifacts_retention_audit.sql`
+- `db/procs/0128_sp_artifact_retention_config_update.sql`
+- `apps/dashboard-web/app/dashboard/artifacts/page.tsx`
+- `apps/dashboard-web/app/actions/artifacts.ts`
+- `apps/runner/src/cleanup-job.ts`
+
+#### Lessons Learned
+- **JOIN conditions vs. FILTER conditions are independent**: In aggregation queries with LEFT JOIN, an `is_active` check in the FILTER clause does not protect non-aggregated columns like `MAX(arc.retention_days)`. The join condition and the filter condition must both be set correctly and independently.
+- **`COALESCE` is one-directional**: `COALESCE(input, existing)` is a common pattern for "optional update" but permanently prevents clearing a field. Always define a sentinel contract (empty string, explicit flag, or separate parameter) if clearing must be possible.
+- **React `useState` with props**: `useState(prop)` initialises once. Any component that derives local edit state from a prop must use `useEffect` to re-sync when the prop changes, with a guard to not override an in-progress edit.
+- **`parseInt` vs `Number` for BIGINT strings**: `Number(str)` is cleaner for numeric string conversion from DB values. The `|| 0` fallback hides parse failures — a stricter guard (`isNaN(n) ? 0 : n`) is more explicit.
+- **Custom `.env` parsers are fragile**: Inline comments, quote styles, and edge cases make ad-hoc `.env` parsers bug-prone. Prefer an established library (`dotenv`) or rely on environment variables being set externally (Docker Compose, CI).
+
+---
+
