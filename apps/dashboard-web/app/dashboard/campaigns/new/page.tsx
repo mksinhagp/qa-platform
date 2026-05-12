@@ -821,6 +821,7 @@ export default function NewCampaignPage() {
           setEnvironments([]);
         }
       })
+      .catch(() => { setEnvironments([]); })
       .finally(() => setEnvsLoading(false));
   }, [selectedSiteId]);
 
@@ -852,13 +853,16 @@ export default function NewCampaignPage() {
       });
 
       if (result.success && result.campaignId) {
-        // Auto-generate scenario matrix after creating campaign
-        await generateScenarioMatrix(result.campaignId);
+        // Auto-generate scenario matrix after creating campaign (non-blocking)
+        try { await generateScenarioMatrix(result.campaignId); } catch {
+          console.warn('Matrix generation failed; campaign was created successfully');
+        }
         router.push(`/dashboard/campaigns/${result.campaignId}`);
       } else {
         setSubmitError(result.error ?? 'Failed to create campaign');
       }
-    } catch {
+    } catch (err) {
+      console.error('Campaign creation error:', err);
       setSubmitError('An unexpected error occurred');
     } finally {
       setSubmitting(false);

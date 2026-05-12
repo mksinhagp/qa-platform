@@ -74,25 +74,27 @@ export default function CampaignsPage() {
   const [filterType, setFilterType] = useState('');
 
   useEffect(() => {
-    loadCampaigns();
-  }, [filterType]);
-
-  async function loadCampaigns() {
-    try {
-      setLoading(true);
-      setError(null);
-      const result = await listCampaigns(filterType || undefined, undefined, undefined);
-      if (result.success && result.campaigns) {
-        setCampaigns(result.campaigns);
-      } else {
-        setError(result.error ?? 'Failed to load campaigns');
+    let active = true;
+    async function load() {
+      try {
+        setLoading(true);
+        setError(null);
+        const result = await listCampaigns(filterType || undefined, undefined, undefined);
+        if (!active) return;
+        if (result.success && result.campaigns) {
+          setCampaigns(result.campaigns);
+        } else {
+          setError(result.error ?? 'Failed to load campaigns');
+        }
+      } catch {
+        if (active) setError('An error occurred while loading campaigns');
+      } finally {
+        if (active) setLoading(false);
       }
-    } catch {
-      setError('An error occurred while loading campaigns');
-    } finally {
-      setLoading(false);
     }
-  }
+    load();
+    return () => { active = false; };
+  }, [filterType]);
 
   return (
     <AppShell>

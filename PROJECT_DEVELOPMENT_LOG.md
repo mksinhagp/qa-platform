@@ -6,6 +6,86 @@ This log captures all major decisions and changes made during development of the
 
 ---
 
+## May 12, 2026 — Phase 20 Dashboard UI: Code Review Fixes + Missing SP
+
+### Summary
+
+Code review of Phase 20 campaign dashboard UI identified and fixed several issues: a missing stored procedure, a React polling race condition, stale closure in useEffect, and missing error handlers.
+
+### Issues Fixed
+
+1. **Missing `sp_campaign_executions_list` stored procedure** — The `listCampaignExecutions` server action called `sp_campaign_executions_list` which did not exist in the database. Created `db/procs/0201_sp_campaign_executions_list.sql` following the existing list SP pattern (0194, 0197). Deployed to PostgreSQL via MCP. Returns executions for a campaign with pagination, ordered by `created_date DESC`.
+
+2. **Polling race condition in campaign detail page** — The auto-refresh `useEffect` had `executions` in its dependency array, causing the interval to be torn down and recreated every time it updated state. Fixed by deriving a `hasRunning` boolean and using that as the dependency instead of the full array. Added `active` flag to prevent state updates after unmount.
+
+3. **Stale closure in campaigns list page** — `loadCampaigns` function was defined outside the `useEffect` but not included in the dependency array. Inlined the async function inside the effect with an `active` cleanup flag to prevent state updates after unmount or rapid filter changes.
+
+4. **Missing `.catch()` on environment loading** — The `listSiteEnvironments` promise chain in the new campaign wizard had no `.catch()` handler. If the call threw, the promise rejection was unhandled. Added `.catch(() => { setEnvironments([]); })`.
+
+5. **Matrix generation failure silently blocking redirect** — If `generateScenarioMatrix` threw after successful campaign creation, the user saw a generic error and was never redirected. Wrapped the matrix generation call in try/catch so the user is redirected regardless (campaign was already created). Added `console.warn` for observability.
+
+### Files Created
+
+- `db/procs/0201_sp_campaign_executions_list.sql` — List campaign executions SP (pagination, ordered by created_date DESC)
+
+### Files Modified
+
+- `apps/dashboard-web/app/dashboard/campaigns/[campaignId]/page.tsx` — Fixed polling race condition, added NaN guard on campaignId
+- `apps/dashboard-web/app/dashboard/campaigns/page.tsx` — Inlined loadCampaigns into useEffect with cleanup flag
+- `apps/dashboard-web/app/dashboard/campaigns/new/page.tsx` — Added .catch() on env loading, wrapped matrix gen in try/catch, added error logging
+
+### Database Changes
+
+| # | File | Function | Action |
+|---|------|----------|--------|
+| 0201 | `0201_sp_campaign_executions_list.sql` | `sp_campaign_executions_list` | Created and deployed via MCP |
+
+### Lessons Learned
+
+- Always verify stored procedures referenced by server actions actually exist before committing
+- React polling patterns should derive a boolean signal for the dependency array rather than using the full data array
+- Promise chains in useEffect always need .catch() even when .finally() is present
+
+---
+
+## May 13, 2026 — Stored Procedures 0157–0166: Account Lifecycle (test_accounts / test_account_actions)
+
+### Summary
+
+Applied 10 stored procedures (0157–0166) to the `qa_platform` PostgreSQL database via the `qa_platform_pg` MCP server connection (`postgresql://qa_user:qa_password@localhost:5434/qa_platform`, Docker container `qa-platform-postgres`). All functions were created successfully with no errors.
+
+### Stored Procedures Applied
+
+| # | File | Function | Purpose |
+|---|------|----------|---------|
+| 0157 | `0157_sp_test_accounts_insert.sql` | `sp_test_accounts_insert` | Insert a new test account record with `pending_registration` status |
+| 0158 | `0158_sp_test_accounts_update_status.sql` | `sp_test_accounts_update_status` | Update account_status, email_verified, verification_method |
+| 0159 | `0159_sp_test_accounts_list.sql` | `sp_test_accounts_list` | List test accounts for a site with optional cleanup/status filters, pagination |
+| 0160 | `0160_sp_test_accounts_get_by_id.sql` | `sp_test_accounts_get_by_id` | Get a single test account by ID (full detail) |
+| 0161 | `0161_sp_test_accounts_request_cleanup.sql` | `sp_test_accounts_request_cleanup` | Transition cleanup_status from `active` → `pending_approval` |
+| 0162 | `0162_sp_test_accounts_approve_cleanup.sql` | `sp_test_accounts_approve_cleanup` | Transition cleanup_status from `pending_approval` → `approved`, records approver |
+| 0163 | `0163_sp_test_accounts_mark_cleaned.sql` | `sp_test_accounts_mark_cleaned` | Transition cleanup_status to `cleaned_up`, sets `cleaned_up_at` timestamp |
+| 0164 | `0164_sp_test_account_actions_insert.sql` | `sp_test_account_actions_insert` | Insert a lifecycle action record for a test account |
+| 0165 | `0165_sp_test_account_actions_list.sql` | `sp_test_account_actions_list` | List all lifecycle actions for a test account, ordered ASC by created_date |
+| 0166 | `0166_sp_test_account_actions_update.sql` | `sp_test_account_actions_update` | Update action_status, duration_ms, error_message, details on an action record |
+
+### Tables Targeted
+
+- `test_accounts` — defined in migration `0022_account_lifecycle_tables.sql` (Phase 15)
+- `test_account_actions` — defined in migration `0022_account_lifecycle_tables.sql` (Phase 15)
+
+### Result
+
+All 10 functions confirmed present in `information_schema.routines` after execution. No errors encountered.
+
+### Notes
+
+- The `qa_platform_pg` MCP server uses a custom Node.js MCP bridge at `packages/mcp-postgres/dist/index.js`. The Docker container exposes PostgreSQL on host port **5434** (internal port 5432).
+- All SQL files contained clean `CREATE OR REPLACE FUNCTION` statements with no `BEGIN;`/`COMMIT;` wrappers — executed directly.
+- These procs implement the Phase 15 account lifecycle automation API layer (registration, status tracking, cleanup workflow, and audit action log).
+
+---
+
 ## May 12, 2026 — Phase 20 Dashboard UI for Campaign Management
 
 ### Summary

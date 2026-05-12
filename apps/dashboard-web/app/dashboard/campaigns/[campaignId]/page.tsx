@@ -224,20 +224,25 @@ export default function CampaignDetailPage() {
   }, [campaignId]);
 
   useEffect(() => {
-    if (campaignId) loadData();
+    if (campaignId && !isNaN(campaignId)) loadData();
   }, [campaignId, loadData]);
 
   // ── Auto-refresh if any execution is running ────────────────────────────────
+  const hasRunning = executions.some(e => e.status === 'running' || e.status === 'pending');
+
   useEffect(() => {
-    const hasRunning = executions.some(e => e.status === 'running' || e.status === 'pending');
     if (!hasRunning) return;
-    const interval = setInterval(() => {
-      listCampaignExecutions(campaignId).then(res => {
-        if (res.success && res.executions) setExecutions(res.executions);
-      });
+    let active = true;
+    const interval = setInterval(async () => {
+      try {
+        const res = await listCampaignExecutions(campaignId);
+        if (active && res.success && res.executions) setExecutions(res.executions);
+      } catch {
+        // polling error — will retry on next interval
+      }
     }, 5000);
-    return () => clearInterval(interval);
-  }, [executions, campaignId]);
+    return () => { active = false; clearInterval(interval); };
+  }, [hasRunning, campaignId]);
 
   async function handleRegenerateMatrix() {
     setActionLoading('regenerate');
