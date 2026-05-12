@@ -62,6 +62,7 @@ None required. CI uses ephemeral test credentials defined inline.
 | `STAGING_SSH_KEY` | Full private key content (PEM format) for SSH authentication. The corresponding public key must be in `~/.ssh/authorized_keys` on the staging server. |
 | `STAGING_DEPLOY_PATH` | Absolute path to the project directory on the staging server (e.g. `/opt/qa-platform`) |
 | `STAGING_DASHBOARD_SESSION_SECRET` | Long random secret (min 32 chars) used to sign dashboard sessions. Generate with: `openssl rand -hex 32` |
+| `STAGING_POSTGRES_PASSWORD` | PostgreSQL password for the staging database. Written to `.env.staging` and forwarded to Docker Compose via `${POSTGRES_PASSWORD}`. |
 
 ### Security Scan Secrets
 

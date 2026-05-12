@@ -168,7 +168,9 @@ if ! pg_restore \
     "${BACKUP_FILE}" 2>&1 | while IFS= read -r line; do
       log_info "[pg_restore] ${line}"
     done; then
-  # pg_restore exits non-zero; the pipe masks the exit code — capture it below
+  # set -o pipefail (active via 'set -euo pipefail' at top of script) propagates a
+  # non-zero exit from pg_restore through the pipe, so the 'if !' branch is taken
+  # correctly when pg_restore fails.
   log_error "pg_restore encountered errors. Check output above."
   exit 1
 fi

@@ -116,13 +116,17 @@ jobs:
           format: sarif
           output: trivy-runner.sarif
 
-      - name: Upload Trivy SARIF results
+      - name: Upload Trivy SARIF — dashboard
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
-          sarif_file: |
-            trivy-dashboard.sarif
-            trivy-runner.sarif
+          sarif_file: trivy-dashboard.sarif
+
+      - name: Upload Trivy SARIF — runner
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-runner.sarif
 
   # ─────────────────────────────────────────────
   # Job 3: Secret scanning (TruffleHog)

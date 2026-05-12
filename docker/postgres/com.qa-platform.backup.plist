@@ -10,9 +10,12 @@
   Logs: /tmp/qa-platform-backup.log (stdout + stderr combined)
 
   Installation:
-    cp docker/postgres/com.qa-platform.backup.plist \
-       ~/Library/LaunchAgents/com.qa-platform.backup.plist
-    launchctl load ~/Library/LaunchAgents/com.qa-platform.backup.plist
+    1. Edit WorkingDirectory below to the absolute path of this repository on your machine.
+       Example: /Users/yourname/Projects/WebsiteTester
+    2. Copy and load:
+         cp docker/postgres/com.qa-platform.backup.plist \
+            ~/Library/LaunchAgents/com.qa-platform.backup.plist
+         launchctl load ~/Library/LaunchAgents/com.qa-platform.backup.plist
 
   Manual trigger (without waiting for the schedule):
     launchctl start com.qa-platform.backup
@@ -42,10 +45,11 @@
     <string>backup</string>
   </array>
 
-  <!-- Working directory must be the project root so docker compose
-       can locate docker-compose.yml and the .env file. -->
+  <!-- Working directory must be the absolute path to the project root on this machine
+       so that docker compose can locate docker-compose.yml and any .env file.
+       EDIT THIS VALUE before installing the plist. -->
   <key>WorkingDirectory</key>
-  <string>/Users/mksmoshome/Library/CloudStorage/OneDrive-Personal/Projects/WebsiteTester</string>
+  <string>/path/to/WebsiteTester</string>
 
   <!-- Run daily at 02:00 AM local time -->
   <key>StartCalendarInterval</key>

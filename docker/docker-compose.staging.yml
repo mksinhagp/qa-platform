@@ -74,6 +74,17 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # Override backup service to use the staging database password rather than
+  # the hardcoded dev default (qa_password) set in docker-compose.yml.
+  backup:
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-qa_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-qa_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+
   # Explicitly exclude ollama and mailcatcher from staging
   # by setting their profiles to a value that is never activated.
   ollama:

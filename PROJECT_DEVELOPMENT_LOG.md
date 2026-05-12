@@ -4373,3 +4373,95 @@ Created `docs/runbooks/troubleshooting.md` (1,337 lines, ~48 KB) — a comprehen
 
 ---
 
+## May 11, 2026 — Phase 10 Code Review: 5 Bugs Fixed
+
+**Task Reference**: Phase 10 code review — infrastructure scripts and CI/CD workflows  
+**Date**: May 11, 2026
+
+### Bugs Found and Fixed
+
+#### BUG 1 — `deploy-staging.yml`: `POSTGRES_PASSWORD` never passed to staging (Critical)
+
+**File**: `.github/workflows/deploy-staging.yml`  
+**Severity**: Critical — deployment always fails at `docker compose up`
+
+`docker-compose.staging.yml` declares `POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}` on the `postgres`, `migrator`, and `dashboard-web` services. The deploy workflow wrote only `NODE_ENV` and `DASHBOARD_SESSION_SECRET` to `.env.staging` and only forwarded those two variables via `envs:` to the SSH action. `POSTGRES_PASSWORD` was never injected, so Docker Compose would immediately abort with the `:?` mandatory-variable error on every deploy.
+
+**Fix**: Added `STAGING_POSTGRES_PASSWORD` secret reference, forwarded it via `envs:`, and added `POSTGRES_PASSWORD=${POSTGRES_PASSWORD}` to the generated `.env.staging` file. Updated `docs/runbooks/cicd-runbook.md` secrets table accordingly.
+
+---
+
+#### BUG 2 — `security-scan.yml`: `upload-sarif` multi-line file path is invalid (High)
+
+**File**: `.github/workflows/security-scan.yml`  
+**Severity**: High — SARIF results never reach the GitHub Security tab
+
+`github/codeql-action/upload-sarif@v3` accepts `sarif_file` as either a path to a single `.sarif` file or a path to a directory containing `.sarif` files. The step used a YAML block scalar (`|`) with two filenames on separate lines, producing the string `"trivy-dashboard.sarif\ntrivy-runner.sarif\n"`. That is not a valid file or directory path — the action would fail to locate it.
+
+**Fix**: Split the single upload step into two separate `upload-sarif` steps, one per image (`trivy-dashboard.sarif` and `trivy-runner.sarif`), each with `if: always()`.
+
+---
+
+#### BUG 3 — `docker-compose.yml` + `docker-compose.staging.yml`: backup service uses hardcoded dev password in staging (High)
+
+**Files**: `docker-compose.yml` (base), `docker/docker-compose.staging.yml` (staging override)  
+**Severity**: High — backup fails silently with wrong credentials on staging
+
+The base `docker-compose.yml` declares the `backup` service with `POSTGRES_PASSWORD: qa_password` (the hardcoded dev value). `docker-compose.staging.yml` overrides the password for `postgres`, `migrator`, and `dashboard-web` to require the real staging password via `${POSTGRES_PASSWORD:?...}` — but the `backup` service had no entry in the staging override. Running a backup on staging would use the dev password and fail to authenticate.
+
+**Fix**: Added a `backup:` service entry to `docker-compose.staging.yml` that overrides all database connection variables using `${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}`, consistent with the other services.
+
+---
+
+#### BUG 4 — `com.qa-platform.backup.plist`: `WorkingDirectory` hardcoded to developer's absolute path (Medium)
+
+**File**: `docker/postgres/com.qa-platform.backup.plist`  
+**Severity**: Medium — launchd agent fails on any machine other than the original developer's
+
+The plist contained `<string>/Users/mksmoshome/Library/CloudStorage/OneDrive-Personal/Projects/WebsiteTester</string>` as the `WorkingDirectory`. Since `docker compose` must run from the project root to locate `docker-compose.yml`, anyone installing this plist on a different machine (or even the same machine after a path change) would get a launchd failure with no helpful error message.
+
+**Fix**: Replaced the hardcoded path with the placeholder `/path/to/WebsiteTester`. Updated the installation comment to explicitly instruct the operator to edit `WorkingDirectory` to the actual project root before loading the plist.
+
+---
+
+#### BUG 5 — `restore.sh`: misleading comment incorrectly describes the pipe exit-code behaviour (Low)
+
+**File**: `docker/postgres/restore.sh` line 171  
+**Severity**: Low — incorrect comment, no functional impact
+
+The comment read: `# pg_restore exits non-zero; the pipe masks the exit code — capture it below`. There was nothing "below" that captured the exit code (no `${PIPESTATUS[0]}` check). The code is actually correct because `set -euo pipefail` at the top of the script causes `pipefail` to propagate the non-zero exit of `pg_restore` through the pipe, triggering the `if !` branch. The comment wrongly implied that `pipefail` did not handle this, and would lead a future maintainer to either add an unnecessary `PIPESTATUS` check or conclude there was a silent bug.
+
+**Fix**: Replaced the misleading comment with an accurate explanation of how `set -o pipefail` makes the error propagation work correctly.
+
+---
+
+### Files Modified
+
+| File | Change |
+|---|---|
+| `.github/workflows/deploy-staging.yml` | Added `STAGING_POSTGRES_PASSWORD` secret; forwarded via `envs:`; added to `.env.staging` heredoc |
+| `.github/workflows/security-scan.yml` | Split single `upload-sarif` step with multi-line path into two separate steps |
+| `docker/docker-compose.staging.yml` | Added `backup:` service override with `${POSTGRES_PASSWORD:?...}` |
+| `docker/postgres/com.qa-platform.backup.plist` | Replaced hardcoded absolute `WorkingDirectory` with `/path/to/WebsiteTester` placeholder; updated install instructions |
+| `docker/postgres/restore.sh` | Corrected misleading pipe exit-code comment |
+| `docs/runbooks/cicd-runbook.md` | Added `STAGING_POSTGRES_PASSWORD` to required secrets table |
+
+### Decisions Made
+
+1. **`STAGING_POSTGRES_PASSWORD` as a separate GitHub secret** (not derived from `POSTGRES_PASSWORD`): Staging and production databases must use different passwords. A dedicated secret per environment follows the principle of least privilege and prevents accidental cross-environment secret reuse.
+
+2. **Two `upload-sarif` steps rather than a directory approach**: Placing both SARIF files in a subdirectory then pointing `sarif_file` at the directory is a valid alternative, but two explicit upload steps are clearer about what is being uploaded and produce separate Security tab entries per image.
+
+3. **Backup staging override uses `:?` mandatory syntax**: Consistent with all other services in the staging override — explicit failure with a clear message is preferable to silently connecting with wrong or empty credentials.
+
+4. **Plist placeholder rather than omitting `WorkingDirectory`**: Without `WorkingDirectory`, launchd runs the job from the user's home directory, which would cause `docker compose` to fail finding `docker-compose.yml`. The placeholder makes it immediately obvious what must be edited without requiring the operator to read the full runbook.
+
+### Lessons Learned
+
+- **Always trace every secret through the full CI/CD chain**: A secret referenced in a compose file's `${VAR:?...}` syntax must be present at every point where compose is invoked — CI job env, SSH envs forwarding list, AND the generated `.env` file. Missing any one link breaks the deployment silently at runtime, not at workflow authoring time.
+- **GitHub Actions `upload-sarif` `sarif_file` takes a path, not a list**: Unlike `actions/upload-artifact` which accepts `path:` as a glob/multi-line list, `upload-sarif` resolves `sarif_file` as a single filesystem path. Mixing up these conventions is easy when authoring from memory.
+- **Docker Compose base-file hardcoded dev credentials require staging overrides for every service that uses them**: When the base compose file has hardcoded dev values (not `${VAR}`), every new service added to the base must also get an entry in the staging override. A safer pattern for production-targeted services is to use `${VAR:?...}` in the base file from the start, which forces explicit provision in all environments.
+- **launchd plist `WorkingDirectory` paths are machine-specific**: plist files committed to the repo must use a placeholder — never a developer's home directory path — because they will be installed on different machines.
+
+---
+
