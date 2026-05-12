@@ -1,4 +1,3 @@
-BEGIN
 -- ============================================================
 -- Stored Procedure: 0128_sp_artifact_retention_config_update
 -- Phase 11.1: Retention enforcement audits and cleanup
@@ -49,5 +48,3 @@ BEGIN
     RETURNING id, artifact_type, retention_days, is_active, notes, updated_date;
 END;
 $$;
-
-END;
