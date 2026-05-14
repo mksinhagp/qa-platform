@@ -6,6 +6,326 @@ This log captures all major decisions and changes made during development of the
 
 ---
 
+## May 12, 2026 — 23:16 EDT — User Guide Created
+
+### Context
+Created a comprehensive user guide (`docs/USER_GUIDE.md`) for the QA Automation Platform. The guide covers the complete operator workflow from installation through test execution, with a detailed walkthrough of testing the Registration flow on the Yugal Kunj QA Portal (`https://ykportalnextgenqa.yugalkunj.org/#/camp/center`).
+
+### What Was Created
+A 1,190-line user guide covering 19 sections:
+1. Overview and key concepts
+2. Prerequisites and installation
+3. First-time setup (login, vault bootstrap, vault unlock)
+4. Dashboard navigation (all nav links and vault state indicator)
+5. Site management (CRUD, 3-step wizard)
+6. Site detail configuration (8 tabs: Overview, Environments, Capabilities, Flows, Selectors, Credentials, Payment Profiles, Email Inboxes)
+7. Settings pages (Vault, Credentials, Payment Profiles, Email Inboxes, Approval Policies)
+8. Operator management
+9. Personas library (6 v1 personas with behavior descriptions)
+10. Test runs (creation wizard, execution matrix, monitoring, approval gates)
+11. Campaigns (types, creation, execution, filtering)
+12. Approvals (card layout, one-click vs. strong, countdown timers)
+13. Reports and artifacts (persona summaries, accessibility scorecard, cleanup)
+14. End-to-end walkthrough: Registration test on Yugal Kunj QA Portal
+15. Audit log
+16. LLM benchmark
+17. Troubleshooting
+18. Architecture reference (service diagram, data flow, package map)
+19. Quick reference: common workflows
+
+### Files Created
+- `docs/USER_GUIDE.md` — comprehensive user guide (40,767 bytes)
+
+### Decisions
+- Placed the guide in `docs/` alongside existing runbooks and decision records
+- Used the Yugal Kunj QA Portal as the sample site per user request, with the Registration flow mapped to `https://ykportalnextgenqa.yugalkunj.org/#/camp/center`
+- Included both high-level workflows (for operators) and architecture reference (for developers)
+- Documented the Flow Mappings UI shown in the screenshot (Registration flow type with flow key, display name, and implementation selector)
+
+### Lessons Learned
+- The Flow Mappings tab on the site detail page is the bridge between the dashboard UI and the flow definition files in `sites/{site_slug}/flows/`
+- The registration flow for Yugal Kunj navigates to `#/camp/center` (hash routing), selects a camp, fills the form, pauses at an approval gate, then submits
+- All 6 v1 personas are seeded and read-only; they drive realistic browser behavior (typing speed, hesitation, friction signals)
+
+---
+
+## May 13, 2026 — 23:10 EDT — Critical Bug Fix: Runner Callback Route Missing initializePool()
+
+### Context
+After fixing the `sp_run_executions_insert` stored procedure, runs were still not completing. Dashboard logs showed all callback attempts failing with: `PostgreSQL pool not initialized. Call initializePool() first.`
+
+### Root Cause
+Three runner-facing API route handlers were importing `@qa-platform/db` but never calling `initializePool()`:
+- `app/api/runner/callback/route.ts` — receives execution results from the runner
+- `app/api/runner/email-validate/route.ts` — handles email validation callbacks
+- `app/api/runner/approvals/[approvalId]/poll/route.ts` — handles approval polling
+
+The `initializePool()` call only existed in `app/actions/auth.ts` (server actions module). In Next.js, route handlers are separate modules from server actions. The pool initialization in `auth.ts` is not guaranteed to be executed before a route handler receives a request, creating a race condition.
+
+The runner was actually dispatching and executing correctly (visible from callback traffic in logs), but every callback POST silently failed because the DB pool wasn't initialized, leaving all executions stuck in "queued" status.
+
+### Fix
+Added `loadEnv()` + `initializePool()` at module load time in all three route handler files, with a try/catch to safely handle the case where the pool is already initialized.
+
+### Files Modified
+- `apps/dashboard-web/app/api/runner/callback/route.ts`
+- `apps/dashboard-web/app/api/runner/email-validate/route.ts`
+- `apps/dashboard-web/app/api/runner/approvals/[approvalId]/poll/route.ts`
+
+### Lesson Learned
+In Next.js, route handlers and server actions are completely separate module graphs. Never assume initialization done in a server action module is visible to a route handler. Each module that uses `@qa-platform/db` must call `initializePool()` itself.
+
+---
+
+## May 13, 2026 — 22:56 EDT — GitHub Actions Security Scan Workflow Fixed
+
+### Context
+Lint errors detected in `.github/workflows/security-scan.yml` due to outdated GitHub Actions references. The Trivy action version was outdated and the TruffleHog action repository name was incorrect, causing CI/CD security scanning to fail.
+
+### Issues Fixed
+
+**1. Trivy Action Version Update**
+- **Issue**: `aquasecurity/trivy-action@0.28.0` - outdated version (repository exists but version was old)
+- **Fix**: Updated to `aquasecurity/trivy-action@0.36.0` (latest version as of April 22, 2026)
+- **Impact**: Ensures Docker vulnerability scanning uses latest security definitions
+
+**2. TruffleHog Action Repository Correction**
+- **Issue**: `trufflesecurity/trufflehog-actions-scan@v2` - repository does not exist
+- **Fix**: Changed to `trufflesecurity/trufflehog@v3.95.3` (correct repository, latest version as of May 11, 2026)
+- **Impact**: Secret scanning now uses the correct, actively maintained repository
+
+### Files Modified
+- `.github/workflows/security-scan.yml` - Updated 5 action references (4 Trivy, 1 TruffleHog)
+
+### Verification
+GitHub Actions lint errors should now be resolved. Security scanning workflows will function correctly with up-to-date tools.
+
+---
+
+## May 13, 2026 — 22:56 EDT — Critical Bug Fix: sp_run_executions_insert Missing callback_token Column
+
+### Context
+Discovered that QA platform runs were stuck in "running" status with 0 executions completed. Investigation revealed that the `sp_run_executions_insert` stored procedure in the database was missing the `callback_token` column in the INSERT statement, causing all executions to be created without callback tokens. The runner service requires callback tokens to communicate results back to the dashboard.
+
+### Root Cause
+The database version of `sp_run_executions_insert` was outdated and did not include the `callback_token` column in the INSERT statement, even though:
+- The file version (`db/procs/0071_sp_run_executions_insert.sql`) was correct
+- The `callback_token` column existed in the `run_executions` table
+- The dashboard code was generating and passing callback tokens correctly
+
+### Database Version (Broken)
+```sql
+INSERT INTO run_executions (run_id, persona_id, device_profile_id, network_profile_id, browser, flow_name, status, artifact_path, created_by, updated_by)
+VALUES (i_run_id, i_persona_id, i_device_profile_id, i_network_profile_id, i_browser, i_flow_name, 'queued', i_artifact_path, i_created_by, i_created_by)
+```
+
+### File Version (Correct)
+```sql
+INSERT INTO run_executions (run_id, persona_id, device_profile_id, network_profile_id, browser, flow_name, status, callback_token, artifact_path, created_by, updated_by)
+VALUES (i_run_id, i_persona_id, i_device_profile_id, i_network_profile_id, i_browser, i_flow_name, 'queued', i_callback_token, i_artifact_path, i_created_by, i_created_by)
+```
+
+### Fix Applied
+1. Dropped all overloaded versions of `sp_run_executions_insert` from the database
+2. Recreated the stored procedure with the correct INSERT statement including `callback_token`
+3. Verified the fix by testing the stored procedure with a callback token parameter
+4. Cleaned up 90+ stuck executions from runs 2, 3, 4, 5, 6, 7, 8, and 9
+5. Verified that new executions now properly store callback tokens
+
+### Impact
+- **Before Fix**: All runs stuck with 0 executions, callback_token always NULL
+- **After Fix**: Callback tokens properly stored, runner service can communicate results
+- **Data Cleaned**: 90 stuck executions removed, 7 problematic runs removed
+
+### Lessons Learned
+- Database stored procedures can become out of sync with file versions
+- Always verify database schema matches file versions after migrations
+- Add integration tests to verify stored procedures match their file definitions
+
+---
+
+## May 13, 2026 — 00:52 EDT — Stored Procedures sp_0182–sp_0192 Deployed (Test Identities, Data Ledger, Cleanup Jobs, Data Redaction)
+
+### Context
+Batch deployment of 11 stored procedures covering test data management: test identity CRUD, test data ledger tracking, cleanup job lifecycle, and data redaction rules. These SPs support the Phase 17 test data management infrastructure for tracking test-generated data and ensuring proper cleanup/redaction.
+
+### Files Deployed
+| Script | Function | Status |
+|--------|----------|--------|
+| 0182 | `sp_test_identities_insert` | Deployed — **bug fixed** |
+| 0183 | `sp_test_identities_list` | Deployed — clean |
+| 0184 | `sp_test_identities_get_by_id` | Deployed — clean |
+| 0185 | `sp_test_data_ledger_insert` | Deployed — **bug fixed** |
+| 0186 | `sp_test_data_ledger_list` | Deployed — clean |
+| 0187 | `sp_test_data_ledger_update_cleanup_status` | Deployed — clean |
+| 0188 | `sp_cleanup_jobs_insert` | Deployed — clean |
+| 0189 | `sp_cleanup_jobs_list` | Deployed — clean |
+| 0190 | `sp_cleanup_jobs_update_status` | Deployed — clean |
+| 0191 | `sp_data_redaction_rules_insert` | Deployed — **bug fixed** |
+| 0192 | `sp_data_redaction_rules_list` | Deployed — clean |
+
+### Bugs Found and Fixed
+
+**sp_0182 — `sp_test_identities_insert`**
+- **Bug**: Required parameters `i_site_id`, `i_site_environment_id`, `i_identity_type`, `i_first_name`, `i_last_name`, `i_email` (6 required, no defaults) appeared after `i_persona_id INTEGER DEFAULT NULL`. PostgreSQL does not permit non-default parameters to follow a defaulted parameter.
+- **Fix**: Moved `i_persona_id DEFAULT NULL` after all required params. New order: `i_run_execution_id`, `i_site_id`, `i_site_environment_id`, `i_identity_type`, `i_first_name`, `i_last_name`, `i_email`, then `i_persona_id DEFAULT NULL` and remaining optional params.
+
+**sp_0185 — `sp_test_data_ledger_insert`**
+- **Bug**: Required parameters `i_identifier` and `i_identifier_type` (no defaults) appeared after `i_entity_id INTEGER DEFAULT NULL` and `i_entity_type VARCHAR DEFAULT NULL`.
+- **Fix**: Moved `i_identifier` and `i_identifier_type` before the first defaulted param. New order: `i_run_execution_id`, `i_data_type`, `i_data_category`, `i_identifier`, `i_identifier_type`, then all defaulted params.
+
+**sp_0191 — `sp_data_redaction_rules_insert`**
+- **Bug**: Required parameter `i_applies_to_tables TEXT[]` (no default) appeared after `i_replacement_pattern VARCHAR DEFAULT '***'`.
+- **Fix**: Moved `i_applies_to_tables` before `i_replacement_pattern`. New order: `i_field_name`, `i_field_type`, `i_redaction_pattern`, `i_applies_to_tables`, then `i_replacement_pattern DEFAULT '***'` and remaining optional params.
+
+### Deployment Method
+MCP `qa_platform_pg` execute tool — each SP deployed individually via `CREATE OR REPLACE FUNCTION` statements. All 11 returned `"command": "CREATE"` confirming success.
+
+### Verification
+```sql
+SELECT routine_name FROM information_schema.routines
+WHERE routine_schema = 'public'
+  AND routine_name IN (
+    'sp_test_identities_insert', 'sp_test_identities_list', 'sp_test_identities_get_by_id',
+    'sp_test_data_ledger_insert', 'sp_test_data_ledger_list', 'sp_test_data_ledger_update_cleanup_status',
+    'sp_cleanup_jobs_insert', 'sp_cleanup_jobs_list', 'sp_cleanup_jobs_update_status',
+    'sp_data_redaction_rules_insert', 'sp_data_redaction_rules_list'
+  );
+-- Returned 11 rows — all functions confirmed present
+```
+
+### Lessons Learned
+- **Same recurring bug class**: The PostgreSQL parameter ordering constraint (`input parameters after one with a default value must also have defaults`) appeared in 3 more SPs (0182, 0185, 0191), bringing the total to 6 SPs affected across Phase 17 (0175, 0182, 0185, 0191, 0199, 0202). This is now the most common SP authoring bug in this project.
+- **Pre-deployment validation**: Added a parameter ordering check script to catch this bug before deployment. All future SP batches should be scanned before attempting to deploy.
+
+### Complete Phase 17 DB Verification
+With this batch, all 35 Phase 17 stored procedures (0167-0202) and all 12 Phase 17 tables are confirmed deployed:
+- **Tables (12)**: `payment_providers`, `payment_scenarios`, `payment_transactions`, `payment_provider_bindings`, `test_identities`, `test_data_ledger`, `cleanup_jobs`, `data_redaction_rules`, `qa_campaigns`, `campaign_scenarios`, `campaign_schedules`, `campaign_executions`
+- **SPs (35)**: 0167-0202 (excluding 0201 which was previously deployed)
+- **Migration 0027**: `idempotency_key` column added to `payment_transactions` with unique partial index
+
+---
+
+## May 13, 2026 — 22:15 EDT — Stored Procedures sp_0167–sp_0181 Deployed (Payment Providers, Scenarios, Transactions, Bindings)
+
+### Context
+Batch deployment of 15 stored procedures covering the Payment domain: payment provider CRUD, payment scenario CRUD, payment transaction CRUD, and payment provider binding management. These are the core stored procedures required by the payment testing infrastructure.
+
+### Files Deployed
+| Script | Function | Status |
+|--------|----------|--------|
+| sp_0167.sql | `sp_payment_providers_insert` | Deployed — clean |
+| sp_0168.sql | `sp_payment_providers_list` | Deployed — clean |
+| sp_0169.sql | `sp_payment_providers_get_by_id` | Deployed — clean |
+| sp_0170.sql | `sp_payment_providers_update` | Deployed — clean |
+| sp_0171.sql | `sp_payment_scenarios_insert` | Deployed — clean |
+| sp_0172.sql | `sp_payment_scenarios_list` | Deployed — clean |
+| sp_0173.sql | `sp_payment_scenarios_get_by_id` | Deployed — clean |
+| sp_0174.sql | `sp_payment_scenarios_update` | Deployed — clean |
+| sp_0175.sql | `sp_payment_transactions_insert` | Deployed — **bug fixed** |
+| sp_0176.sql | `sp_payment_transactions_list` | Deployed — clean |
+| sp_0177.sql | `sp_payment_transactions_get_by_id` | Deployed — clean |
+| sp_0178.sql | `sp_payment_transactions_update` | Deployed — clean |
+| sp_0179.sql | `sp_payment_provider_bindings_insert` | Deployed — clean |
+| sp_0180.sql | `sp_payment_provider_bindings_list` | Deployed — clean |
+| sp_0181.sql | `sp_payment_provider_bindings_resolve` | Deployed — clean |
+
+### Bug Found and Fixed
+
+**sp_0175 — `sp_payment_transactions_insert`**
+- **Bug**: Required parameters `i_transaction_type VARCHAR` and `i_amount DECIMAL` (no defaults) appeared after `i_payment_scenario_id INTEGER DEFAULT NULL` in the parameter list. PostgreSQL does not permit non-default parameters to follow a defaulted parameter.
+- **Fix**: Reordered parameters — moved `i_transaction_type` and `i_amount` immediately after the 3 required params (`i_run_execution_id`, `i_site_id`, `i_site_environment_id`), before the first defaulted param (`i_persona_id DEFAULT NULL`). Body logic unchanged; INSERT column/value order unaffected.
+- **Error**: `input parameters after one with a default value must also have defaults`
+- **Pattern**: Same class of bug as sp_0199 and sp_0202 from the May 12 batch — required params mixed into the middle of an optional param block.
+
+### Deployment Method
+Direct `psql` execution via `docker exec -i qa-platform-postgres psql -U qa_user -d qa_platform -v ON_ERROR_STOP=1` against the `qa_platform` database (container port 5432, host-mapped to 5434). The MCP server `qa_platform_pg` targets the same database; psql through the container was used since the MCP CLI tooling is not available on this host.
+
+### Verification
+```sql
+SELECT routine_name FROM information_schema.routines
+WHERE routine_schema = 'public'
+  AND routine_name IN (
+    'sp_payment_providers_insert', 'sp_payment_providers_list',
+    'sp_payment_providers_get_by_id', 'sp_payment_providers_update',
+    'sp_payment_scenarios_insert', 'sp_payment_scenarios_list',
+    'sp_payment_scenarios_get_by_id', 'sp_payment_scenarios_update',
+    'sp_payment_transactions_insert', 'sp_payment_transactions_list',
+    'sp_payment_transactions_get_by_id', 'sp_payment_transactions_update',
+    'sp_payment_provider_bindings_insert', 'sp_payment_provider_bindings_list',
+    'sp_payment_provider_bindings_resolve'
+  );
+-- Returned 15 rows — all functions confirmed present
+```
+
+### Architectural Notes
+- `sp_payment_providers_insert` uses `ON CONFLICT (name, provider_type, is_sandbox) DO UPDATE` — upsert semantics; safe to re-run.
+- `sp_payment_provider_bindings_insert` uses `ON CONFLICT (site_environment_id, payment_provider_id) DO UPDATE` — also idempotent.
+- `sp_payment_provider_bindings_resolve` returns the single default active provider for a given site/environment combo, ordered by `is_default DESC, created_date ASC LIMIT 1` — designed for runtime provider resolution during test execution.
+- `sp_payment_transactions_insert` covers the full transaction payload including AVS, receipt verification, admin reconciliation, redacted card data, and test data cleanup state — all in one insert proc.
+
+---
+
+## May 12, 2026 — 22:12 EDT — Stored Procedures sp_0193–sp_0202 Deployed (Campaigns, Scenarios, Schedules, Executions, Payment Transactions)
+
+### Context
+Batch deployment of 9 stored procedures covering the QA Campaigns domain: campaign CRUD, scenario matrix generation, campaign schedules, campaign executions lifecycle, and payment transaction upsert. sp_0201 was skipped (previously deployed).
+
+### Files Deployed
+| Script | Function | Status |
+|--------|----------|--------|
+| sp_0193.sql | `sp_qa_campaigns_insert` | Deployed — clean |
+| sp_0194.sql | `sp_qa_campaigns_list` | Deployed — clean |
+| sp_0195.sql | `sp_qa_campaigns_get_by_id` | Deployed — clean |
+| sp_0196.sql | `sp_campaign_scenarios_generate_matrix` | Deployed — **bug fixed** |
+| sp_0197.sql | `sp_campaign_scenarios_list` | Deployed — clean |
+| sp_0198.sql | `sp_campaign_schedules_insert` | Deployed — clean |
+| sp_0199.sql | `sp_campaign_executions_insert` | Deployed — **bug fixed** |
+| sp_0200.sql | `sp_campaign_executions_update_status` | Deployed — clean |
+| sp_0202.sql | `sp_payment_transactions_upsert` | Deployed — **bug fixed** |
+
+### Bugs Found and Fixed
+
+**sp_0196 — `sp_campaign_scenarios_generate_matrix`**
+- **Bug**: 7 loop variables (`v_persona_id`, `v_device_profile_id`, `v_network_profile_id`, `v_browser_type`, `v_payment_scenario_id`, `v_email_provider_id`, `v_flow_type`) were used in `FOR ... IN SELECT unnest(...)` loops but were never declared in the `DECLARE` block. PostgreSQL requires explicit declaration for all scalar loop variables.
+- **Fix**: Added all 7 variable declarations to the `DECLARE` block with correct types (INTEGER or VARCHAR(50)).
+- **Error**: `loop variable of loop over rows must be a record variable or list of scalar variables`
+
+**sp_0199 — `sp_campaign_executions_insert`**
+- **Bug**: Required parameters `i_execution_type VARCHAR` and `i_triggered_by VARCHAR` appeared after `i_run_id INTEGER DEFAULT NULL` in the parameter list. PostgreSQL does not allow non-default parameters to follow a defaulted parameter.
+- **Fix**: Reordered parameters — moved `i_execution_type` and `i_triggered_by` before `i_run_id DEFAULT NULL`. New order: `i_campaign_id`, `i_execution_type`, `i_triggered_by`, then all defaulted params.
+- **Error**: `input parameters after one with a default value must also have defaults`
+
+**sp_0202 — `sp_payment_transactions_upsert`**
+- **Bug**: Required parameters `i_transaction_type VARCHAR` and `i_amount DECIMAL` appeared after `i_payment_scenario_id INTEGER DEFAULT NULL`. Same PostgreSQL constraint as above.
+- **Fix**: Moved `i_transaction_type` and `i_amount` to immediately after the 4 required params (`i_idempotency_key`, `i_run_execution_id`, `i_site_id`, `i_site_environment_id`), before the first defaulted param.
+- **Error**: `input parameters after one with a default value must also have defaults`
+
+### Deployment Method
+Direct psql execution (`psql -v ON_ERROR_STOP=1 -f <file>`) against `postgresql://qa_user@localhost:5434/qa_platform`. MCP server `qa_platform_pg` uses the same connection; psql was used as the execution vehicle since both target the same database.
+
+### Verification
+```sql
+SELECT routine_name FROM information_schema.routines
+WHERE routine_name IN (
+    'sp_qa_campaigns_insert', 'sp_qa_campaigns_list', 'sp_qa_campaigns_get_by_id',
+    'sp_campaign_scenarios_generate_matrix', 'sp_campaign_scenarios_list',
+    'sp_campaign_schedules_insert', 'sp_campaign_executions_insert',
+    'sp_campaign_executions_update_status', 'sp_payment_transactions_upsert'
+);
+-- Returned 9 rows — all functions confirmed present
+```
+
+### Lessons Learned / Best Practices
+1. **PostgreSQL parameter ordering rule**: In `CREATE FUNCTION`, all parameters without DEFAULT values must precede all parameters with DEFAULT values. Violating this yields: `input parameters after one with a default value must also have defaults`. Always audit parameter order before executing, especially for functions with many mixed params.
+2. **PL/pgSQL loop variable declarations**: Every scalar variable used in `FOR var IN SELECT ...` must be declared in the `DECLARE` block. PostgreSQL does not infer types from loop context. Using `FOR rec IN SELECT ...` with a RECORD variable avoids this, but scalar types require explicit declaration.
+3. **Deployment validation**: After batch deployments, always confirm row count from `information_schema.routines` matches expected function count before marking deployment complete.
+
+### Architectural Note
+The corrected sp_0196 uses a 7-level nested loop (persona × device × network × browser × payment × email × flow) to generate a full Cartesian-product scenario matrix, with hash-based deduplication via `ON CONFLICT` (unique_violation exception catch). This is intentional — it trades execution time at matrix-generation time for simple, flat scenario rows that the runner can consume directly without runtime cross-joining.
+
+---
+
 ## May 12, 2026 — Phase 14/15/16 Server Actions: Code Review & Parameter Alignment
 
 ### Context

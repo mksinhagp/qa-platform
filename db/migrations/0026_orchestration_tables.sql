@@ -41,12 +41,12 @@ CREATE INDEX idx_qa_campaigns_is_active ON qa_campaigns(is_active);
 CREATE TABLE IF NOT EXISTS campaign_scenarios (
     id SERIAL PRIMARY KEY,
     campaign_id INTEGER REFERENCES qa_campaigns(id) ON DELETE CASCADE,
-    persona_id INTEGER REFERENCES personas(id) ON DELETE SET NULL,
+    persona_id VARCHAR(255) REFERENCES personas(id) ON DELETE SET NULL,
     device_profile_id INTEGER REFERENCES device_profiles(id) ON DELETE SET NULL,
     network_profile_id INTEGER REFERENCES network_profiles(id) ON DELETE SET NULL,
     browser_type VARCHAR(50),
     payment_scenario_id INTEGER REFERENCES payment_scenarios(id) ON DELETE SET NULL,
-    email_provider_id INTEGER REFERENCES payment_providers(id) ON DELETE SET NULL,
+    email_provider_id INTEGER REFERENCES email_providers(id) ON DELETE SET NULL,
     flow_type VARCHAR(50),
     scenario_hash VARCHAR(255) NOT NULL, -- Hash of all scenario dimensions for deduplication
     is_active BOOLEAN NOT NULL DEFAULT TRUE,

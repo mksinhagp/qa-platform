@@ -4,8 +4,8 @@ CREATE OR REPLACE FUNCTION sp_data_redaction_rules_insert(
     i_field_name VARCHAR,
     i_field_type VARCHAR,
     i_redaction_pattern VARCHAR,
-    i_replacement_pattern VARCHAR DEFAULT '***',
     i_applies_to_tables TEXT[],
+    i_replacement_pattern VARCHAR DEFAULT '***',
     i_priority INTEGER DEFAULT 100,
     i_description TEXT DEFAULT NULL,
     i_created_by VARCHAR DEFAULT NULL

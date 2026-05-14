@@ -8,7 +8,16 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { invokeProc, invokeProcWrite } from '@qa-platform/db';
+import { invokeProc, invokeProcWrite, initializePool } from '@qa-platform/db';
+import { loadEnv } from '@qa-platform/config';
+
+// Initialize the PostgreSQL pool for this route handler module.
+try {
+  loadEnv();
+  initializePool();
+} catch {
+  // Pool may already be initialized; safe to ignore.
+}
 
 export async function GET(
   request: NextRequest,

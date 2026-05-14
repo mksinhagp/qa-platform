@@ -19,9 +19,18 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { invokeProc } from '@qa-platform/db';
+import { invokeProc, initializePool } from '@qa-platform/db';
+import { loadEnv } from '@qa-platform/config';
 import { decryptSecret } from '@qa-platform/vault';
 import { startEmailValidation } from '../../../actions/emailValidation';
+
+// Initialize the PostgreSQL pool for this route handler module.
+try {
+  loadEnv();
+  initializePool();
+} catch {
+  // Pool may already be initialized; safe to ignore.
+}
 import type { ImapConfig } from '@qa-platform/email';
 
 export async function POST(request: NextRequest) {

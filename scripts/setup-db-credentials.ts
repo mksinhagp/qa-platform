@@ -43,30 +43,34 @@ function question(rl: readline.Interface, query: string): Promise<string> {
   });
 }
 
-function questionHidden(_rl: readline.Interface, query: string): Promise<string> {
+function questionHidden(rl: readline.Interface, query: string): Promise<string> {
   return new Promise((resolve) => {
     const stdin = process.stdin;
     const stdout = process.stdout;
+
+    // Pause readline so it stops consuming stdin before we take raw mode
+    rl.pause();
 
     // Disable echo
     stdin.setRawMode(true);
     stdout.write(query);
 
     let password = '';
-    
-    stdin.on('data', (char) => {
+
+    const onData = (char: Buffer) => {
       const charStr = char.toString();
-      
+
       if (charStr === '\n' || charStr === '\r' || charStr === '\u0004') {
         // Enter or Ctrl-D
         stdin.setRawMode(false);
-        stdin.removeAllListeners('data');
+        stdin.removeListener('data', onData);
         stdout.write('\n');
+        rl.resume();
         resolve(password);
       } else if (charStr === '\u0003') {
         // Ctrl-C
         stdin.setRawMode(false);
-        stdin.removeAllListeners('data');
+        stdin.removeListener('data', onData);
         stdout.write('\n');
         process.exit(1);
       } else if (charStr === '\u007f') {
@@ -80,7 +84,9 @@ function questionHidden(_rl: readline.Interface, query: string): Promise<string>
         password += charStr;
         stdout.write('*');
       }
-    });
+    };
+
+    stdin.on('data', onData);
   });
 }
 
@@ -123,6 +129,9 @@ function saveEnv(envFile: string, env: Record<string, string>): void {
         if (key && env[key.trim()] !== undefined) {
           lines.push(`${key.trim()}=${env[key.trim()]}`);
           seenKeys.add(key.trim());
+        } else {
+          // Preserve all existing vars not being updated
+          lines.push(line);
         }
       }
     }
@@ -172,15 +181,18 @@ async function promptCredentials(
   ) || existing.POSTGRES_USER || 'qa_user';
 
   console.log('\n---');
-  const password = await questionHidden(
+  const rawPassword = await questionHidden(
     rl,
     `PostgreSQL Password [${existing.POSTGRES_PASSWORD ? '(already set)' : 'required'}]: `
   ) || existing.POSTGRES_PASSWORD;
 
-  if (!password) {
+  if (!rawPassword) {
     console.log('\nError: PostgreSQL password is required.');
     process.exit(1);
   }
+
+  // Strip surrounding quotes that may exist in the .env value before length check
+  const password = rawPassword.replace(/^["']|["']$/g, '');
 
   if (password.length < 8) {
     console.log('\nError: PostgreSQL password must be at least 8 characters.');
@@ -198,13 +210,14 @@ async function promptCredentials(
 
 async function main() {
   const environment = process.argv[2] || 'development';
-  const envFile = ENV_FILES[environment as keyof typeof ENV_FILES] || ENV_FILE;
 
   if (!['development', 'staging', 'production'].includes(environment)) {
     console.error(`Invalid environment: ${environment}`);
     console.error('Valid environments: development, staging, production');
     process.exit(1);
   }
+
+  const envFile = ENV_FILES[environment as keyof typeof ENV_FILES];
 
   console.log(`Setting up database credentials for ${environment.toUpperCase()}`);
   console.log(`Credentials will be saved to: ${envFile}\n`);

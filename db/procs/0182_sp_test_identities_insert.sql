@@ -2,13 +2,13 @@ BEGIN
 -- Stored Procedure 0182: Insert test identity
 CREATE OR REPLACE FUNCTION sp_test_identities_insert(
     i_run_execution_id INTEGER,
-    i_persona_id INTEGER DEFAULT NULL,
     i_site_id INTEGER,
     i_site_environment_id INTEGER,
     i_identity_type VARCHAR,
     i_first_name VARCHAR,
     i_last_name VARCHAR,
     i_email VARCHAR,
+    i_persona_id INTEGER DEFAULT NULL,
     i_username VARCHAR DEFAULT NULL,
     i_phone VARCHAR DEFAULT NULL,
     i_date_of_birth DATE DEFAULT NULL,

@@ -6,7 +6,7 @@ BEGIN
 CREATE TABLE IF NOT EXISTS test_identities (
     id SERIAL PRIMARY KEY,
     run_execution_id INTEGER REFERENCES run_executions(id) ON DELETE CASCADE,
-    persona_id INTEGER REFERENCES personas(id) ON DELETE SET NULL,
+    persona_id VARCHAR(255) REFERENCES personas(id) ON DELETE SET NULL,
     site_id INTEGER REFERENCES sites(id) ON DELETE CASCADE,
     site_environment_id INTEGER REFERENCES site_environments(id) ON DELETE CASCADE,
     identity_type VARCHAR(50) NOT NULL, -- 'registrant', 'guest', 'admin', etc.
@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS test_data_ledger (
     identifier_type VARCHAR(50), -- 'email', 'username', 'transaction_id', 'order_number', etc.
     site_id INTEGER REFERENCES sites(id) ON DELETE CASCADE,
     site_environment_id INTEGER REFERENCES site_environments(id) ON DELETE CASCADE,
-    persona_id INTEGER REFERENCES personas(id) ON DELETE SET NULL,
+    persona_id VARCHAR(255) REFERENCES personas(id) ON DELETE SET NULL,
     data_json JSONB, -- Full data snapshot for debugging
     sensitive_fields TEXT[], -- List of sensitive field names that should be redacted
     cleanup_status VARCHAR(50) NOT NULL DEFAULT 'pending', -- 'pending', 'cleanup_requested', 'cleanup_completed', 'cleanup_failed', 'cleanup_skipped'

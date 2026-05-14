@@ -22,7 +22,18 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { invokeProc, invokeProcWrite } from '@qa-platform/db';
+import { invokeProc, invokeProcWrite, initializePool } from '@qa-platform/db';
+import { loadEnv } from '@qa-platform/config';
+
+// Initialize the PostgreSQL pool for this route handler module.
+// Route handlers are isolated from server actions, so the pool initialized
+// in auth.ts is not guaranteed to be available here.
+try {
+  loadEnv();
+  initializePool();
+} catch {
+  // Pool may already be initialized if another module ran first; safe to ignore.
+}
 
 // ─── Zod schema for the Phase 8 llm_analysis_result payload ──────────────────
 

@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS payment_transactions (
     run_execution_id INTEGER REFERENCES run_executions(id) ON DELETE CASCADE,
     site_id INTEGER REFERENCES sites(id) ON DELETE CASCADE,
     site_environment_id INTEGER REFERENCES site_environments(id) ON DELETE CASCADE,
-    persona_id INTEGER REFERENCES personas(id) ON DELETE SET NULL,
+    persona_id VARCHAR(255) REFERENCES personas(id) ON DELETE SET NULL,
     payment_provider_id INTEGER REFERENCES payment_providers(id) ON DELETE SET NULL,
     payment_profile_id INTEGER REFERENCES payment_profiles(id) ON DELETE SET NULL,
     payment_scenario_id INTEGER REFERENCES payment_scenarios(id) ON DELETE SET NULL,
